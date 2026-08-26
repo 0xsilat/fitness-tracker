@@ -2,6 +2,7 @@ package web
 
 import (
 	"fmt"
+	"time"
 	"github.com/local/fitness-tracker/internal/domain"
 )
 
@@ -19,7 +20,7 @@ templ Layout(title string) {
 			<header class="site-header">
 				<a class="brand" href="/"><span class="brand-mark">T</span><span>Tempo</span></a>
 				<nav aria-label="Primary">
-					<a href="/">Today</a><a href="/routines">Routines</a><a href="/exercises">Exercises</a><a href="/analytics">Analytics</a><a href="/sessions">History</a>
+					<a href="/">Today</a><a href="/routines">Routines</a><a href="/exercises">Exercises</a><a href="/analytics">Analytics</a><a href="/sessions">Log</a>
 				</nav>
 			</header>
 			<main class="page">{ children... }</main>
@@ -60,11 +61,11 @@ templ DashboardPage(d domain.Dashboard) {
 				</div></section>
 			}
 			if d.NextWorkout != nil {
-				<section class="hero-card"><div><p class="eyebrow">Up next · Day { fmt.Sprintf("%d",d.NextWorkout.Position) }</p><h2>{ d.NextWorkout.Name }</h2><p>{ fmt.Sprintf("%d",len(d.NextWorkout.Prescription.Movements)) } exercise blocks · formats can be mixed</p></div><form method="post" action={ fmt.Sprintf("/workouts/%d/start",d.NextWorkout.ID) }><button class="button primary large">Start workout <span>→</span></button></form></section>
+				<section class="hero-card"><div><p class="eyebrow">Up next · Day { fmt.Sprintf("%d",d.NextWorkout.Position) }</p><h2>{ d.NextWorkout.Name }</h2><p>{ fmt.Sprintf("%d",len(d.NextWorkout.Prescription.Movements)) } exercise blocks · formats can be mixed</p></div><a class="button primary large" href={ templ.SafeURL(fmt.Sprintf("/sessions?new=1&workout_id=%d",d.NextWorkout.ID)) }>Log workout <span>→</span></a></section>
 			}
 			<section><div class="section-title"><h2>Choose a workout</h2><a href={ templ.SafeURL(fmt.Sprintf("/routines/%d",d.ActiveRoutine.ID)) }>Edit routine</a></div><div class="workout-list">
 				for _, w := range d.Workouts {
-					<div class="workout-row"><span class="day-number">{ fmt.Sprintf("%02d",w.Position) }</span><div><strong>{ w.Name }</strong><small>{ fmt.Sprintf("%d exercise blocks",len(w.Prescription.Movements)) }</small></div><form method="post" action={ fmt.Sprintf("/workouts/%d/start",w.ID) }><button class="button ghost">Log</button></form></div>
+					<div class="workout-row"><span class="day-number">{ fmt.Sprintf("%02d",w.Position) }</span><div><strong>{ w.Name }</strong><small>{ fmt.Sprintf("%d exercise blocks",len(w.Prescription.Movements)) }</small></div><a class="button ghost" href={ templ.SafeURL(fmt.Sprintf("/sessions?new=1&workout_id=%d",w.ID)) }>Log</a></div>
 				}
 			</div></section>
 			<section><div class="section-title"><h2>Recent sessions</h2><a href="/sessions">See all</a></div>
@@ -83,7 +84,7 @@ templ DashboardPage(d domain.Dashboard) {
 	}
 }
 
-templ SessionCard(x domain.Session) { <a class="session-card" href={ templ.SafeURL(fmt.Sprintf("/sessions/%d",x.ID)) }><span class={ "status "+x.Status }>{ x.Status }</span><h3>{ x.WorkoutName }</h3><p>{ x.RoutineName }</p><small>{ date(x.StartedAt) } · { formatName(x.Format) }</small></a> }
+templ SessionCard(x domain.Session) { <a class="session-card" href={ templ.SafeURL(fmt.Sprintf("/sessions/%d",x.ID)) }><span class={ "status "+x.Status }>{ x.Status }</span><h3>{ x.WorkoutName }</h3><p>{ x.RoutineName }</p><small>Performed { date(x.PerformedOn) } · { formatName(x.Format) }</small></a> }
 
 templ ExercisesPage(items []domain.Exercise,showArchived bool) {
 	@Layout("Exercises") {
@@ -167,7 +168,7 @@ templ WorkoutPage(r domain.Routine,w domain.Workout,exercises []domain.Exercise)
 		<a class="back" href={ templ.SafeURL(fmt.Sprintf("/routines/%d",r.ID)) }>← { r.Name }</a>
 		@PageHeader(fmt.Sprintf("Day %d · Mixed formats",w.Position),w.Name,"Choose a format for each exercise block; EMOM and sets × reps can live in the same workout.") {
 			if len(w.Prescription.Movements) > 0 {
-				<form method="post" action={ fmt.Sprintf("/workouts/%d/start",w.ID) }><button class="button primary">Start workout</button></form>
+				<a class="button primary" href={ templ.SafeURL(fmt.Sprintf("/sessions?new=1&workout_id=%d",w.ID)) }>Log workout</a>
 			}
 		}
 		<div class="split wide-left">
@@ -209,24 +210,35 @@ templ WorkoutPage(r domain.Routine,w domain.Workout,exercises []domain.Exercise)
 	}
 }
 
-templ SessionsPage(items []domain.Session) {
-	@Layout("History") {
-		@PageHeader("Training log","Session history","Drafts stay resumable; completed sessions preserve the workout exactly as performed.") {}
-		<div class="card-grid">
+templ SessionsPage(items []domain.Session,groups []domain.WorkoutGroup,showNewForm bool,selectedWorkoutID int64,performedOn time.Time) {
+	@Layout("Log workouts") {
+		@PageHeader("Training log","Log workouts","Add a workout entry, then review your complete training history.") { <a class="button primary" href="/sessions?new=1">Add new workout</a> }
+		if showNewForm {
+			<section class="panel session-start"><div class="section-title"><h2>Add new workout</h2><a href="/sessions">Cancel</a></div><form class="stack" method="post" action="/sessions"><label>Workout<select name="workout_id" required><option value="">Choose a workout</option>
+				for _, group := range groups {
+					<optgroup label={ routineLogLabel(group.Routine) }>
+						for _, workout := range group.Workouts {
+							<option value={ fmt.Sprintf("%d",workout.ID) } selected?={ workout.ID == selectedWorkoutID }>{ workout.Name }</option>
+						}
+					</optgroup>
+				}
+			</select></label><label>Date performed<input name="performed_on" type="date" value={ inputDate(performedOn) } required/></label><button class="button primary">Start logging</button></form></section>
+		}
+		<section><div class="section-title"><h2>Log history</h2><span>{ fmt.Sprintf("%d",len(items)) } entries</span></div><div class="card-grid">
 			if len(items) == 0 {
-				<p class="muted">No sessions yet.</p>
+				<p class="muted">No workout entries yet.</p>
 			}
 			for _, x := range items {
 				@SessionCard(x)
 			}
-		</div>
+		</div></section>
 	}
 }
 
 templ SessionPage(s domain.Session,exercises []domain.SessionExercise) {
 	@Layout(s.WorkoutName) {
-		<a class="back" href="/sessions">← Session history</a>
-		@PageHeader(s.RoutineName,s.WorkoutName,formatName(s.Format)+" · Started "+date(s.StartedAt)) { <span class={ "status "+s.Status }>{ s.Status }</span> }
+		<a class="back" href="/sessions">← Log workouts</a>
+		@PageHeader(s.RoutineName,s.WorkoutName,formatName(s.Format)+" · Performed "+date(s.PerformedOn)) { <span class={ "status "+s.Status }>{ s.Status }</span> }
 		if s.Status=="draft" {
 			<form class="session-form" method="post" action={ fmt.Sprintf("/sessions/%d/save",s.ID) } hx-post={ fmt.Sprintf("/sessions/%d/save",s.ID) } hx-trigger="change delay:500ms" hx-target="#save-status" hx-swap="outerHTML">
 				@SessionExercises(exercises,true)

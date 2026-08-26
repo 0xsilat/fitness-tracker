@@ -62,11 +62,20 @@ type Session struct {
 	WorkoutName string
 	Format      string
 	Status      string
+	PerformedOn time.Time
 	StartedAt   time.Time
 	CompletedAt *time.Time
 	Notes       string
 	RPE         *int
 	Snapshot    Prescription
+}
+
+// WorkoutGroup is a routine and its workout templates, used when choosing a
+// workout to log. It intentionally includes archived routines so historic
+// programs can still be recorded.
+type WorkoutGroup struct {
+	Routine  Routine
+	Workouts []Workout
 }
 
 type SessionExercise struct {

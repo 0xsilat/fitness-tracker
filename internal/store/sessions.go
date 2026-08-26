@@ -9,7 +9,7 @@ import (
 	"github.com/local/fitness-tracker/internal/domain"
 )
 
-func (s *Store) StartSession(ctx context.Context, workoutID int64) (int64, error) {
+func (s *Store) StartSession(ctx context.Context, workoutID int64, performedOn time.Time) (int64, error) {
 	var existing int64
 	err := s.pool.QueryRow(ctx, `SELECT id FROM sessions WHERE workout_id=$1 AND status='draft'`, workoutID).Scan(&existing)
 	if err == nil {
@@ -36,7 +36,7 @@ func (s *Store) StartSession(ctx context.Context, workoutID int64) (int64, error
 	}
 	defer tx.Rollback(ctx)
 	var sessionID int64
-	err = tx.QueryRow(ctx, `INSERT INTO sessions(routine_id,workout_id,routine_name,workout_name,format,status,prescription_snapshot) VALUES($1,$2,$3,$4,'mixed','draft',$5) RETURNING id`, r.ID, w.ID, r.Name, w.Name, raw).Scan(&sessionID)
+	err = tx.QueryRow(ctx, `INSERT INTO sessions(routine_id,workout_id,routine_name,workout_name,format,status,performed_on,prescription_snapshot) VALUES($1,$2,$3,$4,'mixed','draft',$5,$6) RETURNING id`, r.ID, w.ID, r.Name, w.Name, performedOn, raw).Scan(&sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -58,7 +58,7 @@ func (s *Store) StartSession(ctx context.Context, workoutID int64) (int64, error
 func (s *Store) Session(ctx context.Context, id int64) (domain.Session, []domain.SessionExercise, error) {
 	var out domain.Session
 	var raw []byte
-	err := s.pool.QueryRow(ctx, `SELECT id,routine_id,workout_id,routine_name,workout_name,format,status,started_at,completed_at,notes,rpe,prescription_snapshot FROM sessions WHERE id=$1`, id).Scan(&out.ID, &out.RoutineID, &out.WorkoutID, &out.RoutineName, &out.WorkoutName, &out.Format, &out.Status, &out.StartedAt, &out.CompletedAt, &out.Notes, &out.RPE, &raw)
+	err := s.pool.QueryRow(ctx, `SELECT id,routine_id,workout_id,routine_name,workout_name,format,status,performed_on,started_at,completed_at,notes,rpe,prescription_snapshot FROM sessions WHERE id=$1`, id).Scan(&out.ID, &out.RoutineID, &out.WorkoutID, &out.RoutineName, &out.WorkoutName, &out.Format, &out.Status, &out.PerformedOn, &out.StartedAt, &out.CompletedAt, &out.Notes, &out.RPE, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil, ErrNotFound
 	}
@@ -172,7 +172,7 @@ func (s *Store) Sessions(ctx context.Context, limit int) ([]domain.Session, erro
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id,routine_id,workout_id,routine_name,workout_name,format,status,started_at,completed_at,notes,rpe FROM sessions ORDER BY CASE WHEN status='draft' THEN 0 ELSE 1 END,coalesce(completed_at,started_at) DESC LIMIT $1`, limit)
+	rows, err := s.pool.Query(ctx, `SELECT id,routine_id,workout_id,routine_name,workout_name,format,status,performed_on,started_at,completed_at,notes,rpe FROM sessions ORDER BY CASE WHEN status='draft' THEN 0 ELSE 1 END,performed_on DESC,coalesce(completed_at,started_at) DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -180,12 +180,30 @@ func (s *Store) Sessions(ctx context.Context, limit int) ([]domain.Session, erro
 	var out []domain.Session
 	for rows.Next() {
 		var x domain.Session
-		if err := rows.Scan(&x.ID, &x.RoutineID, &x.WorkoutID, &x.RoutineName, &x.WorkoutName, &x.Format, &x.Status, &x.StartedAt, &x.CompletedAt, &x.Notes, &x.RPE); err != nil {
+		if err := rows.Scan(&x.ID, &x.RoutineID, &x.WorkoutID, &x.RoutineName, &x.WorkoutName, &x.Format, &x.Status, &x.PerformedOn, &x.StartedAt, &x.CompletedAt, &x.Notes, &x.RPE); err != nil {
 			return nil, err
 		}
 		out = append(out, x)
 	}
 	return out, rows.Err()
+}
+
+func (s *Store) WorkoutGroups(ctx context.Context) ([]domain.WorkoutGroup, error) {
+	routines, err := s.Routines(ctx)
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]domain.WorkoutGroup, 0, len(routines))
+	for _, routine := range routines {
+		workouts, err := s.Workouts(ctx, routine.ID)
+		if err != nil {
+			return nil, err
+		}
+		if len(workouts) > 0 {
+			groups = append(groups, domain.WorkoutGroup{Routine: routine, Workouts: workouts})
+		}
+	}
+	return groups, nil
 }
 
 func (s *Store) Dashboard(ctx context.Context) (domain.Dashboard, error) {
@@ -206,7 +224,7 @@ func (s *Store) Dashboard(ctx context.Context) (domain.Dashboard, error) {
 			return d, e
 		}
 		var last int64
-		_ = s.pool.QueryRow(ctx, `SELECT s.workout_id FROM sessions s JOIN workouts w ON w.id=s.workout_id WHERE s.routine_id=$1 AND s.status='completed' ORDER BY s.completed_at DESC LIMIT 1`, activeID).Scan(&last)
+		_ = s.pool.QueryRow(ctx, `SELECT s.workout_id FROM sessions s JOIN workouts w ON w.id=s.workout_id WHERE s.routine_id=$1 AND s.status='completed' ORDER BY s.performed_on DESC,s.completed_at DESC LIMIT 1`, activeID).Scan(&last)
 		d.NextWorkout = domain.NextWorkout(d.Workouts, last)
 	}
 	all, err := s.Sessions(ctx, 8)
@@ -222,6 +240,6 @@ func (s *Store) Dashboard(ctx context.Context) (domain.Dashboard, error) {
 	}
 	week := time.Now()
 	week = time.Date(week.Year(), week.Month(), week.Day(), 0, 0, 0, 0, week.Location()).AddDate(0, 0, -6)
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE status='completed' AND completed_at >= $1`, week).Scan(&d.SessionsThisWeek)
+	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE status='completed' AND performed_on >= $1::date`, week).Scan(&d.SessionsThisWeek)
 	return d, nil
 }
