@@ -12,7 +12,6 @@ docker compose up --build
 
 Open [http://localhost:8080](http://localhost:8080). The database is stored in the named `fitness_data` volume and survives container restarts. Stop the application with `docker compose down`; add `-v` only when you intentionally want to erase all fitness data.
 
-For mobile use, connect your phone to the same Wi-Fi network and open `http://YOUR-COMPUTER-LAN-IP:8080`. Docker publishes the app to the local network. Because this single-user version has no authentication, use it only on a trusted private network and do not expose port 8080 to the public internet.
 
 The application applies embedded, transactional SQL migrations on startup and seeds a small reusable exercise library. It is designed for one local user and has no login screen.
 
