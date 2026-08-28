@@ -109,6 +109,15 @@ type Dashboard struct {
 	Recent           []Session
 	Drafts           []Session
 	SessionsThisWeek int
+	SessionCount7    int
+	SessionCount30   int
+	SessionCount90   int
+	Activity         []ActivityDay
+}
+
+type ActivityDay struct {
+	Date     time.Time
+	Sessions int
 }
 
 type RoutineAnalytics struct {

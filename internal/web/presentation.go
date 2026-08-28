@@ -13,6 +13,71 @@ func number(value float64) string {
 }
 func date(value time.Time) string      { return value.Format("02 Jan 2006") }
 func inputDate(value time.Time) string { return value.Format("2006-01-02") }
+
+func activityLevel(count int) string {
+	if count <= 0 {
+		return "activity-cell level-0"
+	}
+	if count == 1 {
+		return "activity-cell level-1"
+	}
+	if count == 2 {
+		return "activity-cell level-2"
+	}
+	return "activity-cell level-3"
+}
+
+func activityLabel(day domain.ActivityDay) string {
+	word := "sessions"
+	if day.Sessions == 1 {
+		word = "session"
+	}
+	return fmt.Sprintf("%s: %d %s", day.Date.Format("02 Jan 2006"), day.Sessions, word)
+}
+
+func activityOffset(days []domain.ActivityDay) int {
+	if len(days) == 0 {
+		return 0
+	}
+	return (int(days[0].Date.Weekday()) + 6) % 7
+}
+
+type activityMonthMarker struct {
+	Label  string
+	Column int
+}
+
+func activityWeekCount(days []domain.ActivityDay) int {
+	if len(days) == 0 {
+		return 0
+	}
+	return (activityOffset(days) + len(days) + 6) / 7
+}
+
+func activityMonthMarkers(days []domain.ActivityDay) []activityMonthMarker {
+	var markers []activityMonthMarker
+	offset := activityOffset(days)
+	for i, day := range days {
+		if day.Date.Day() != 1 {
+			continue
+		}
+		markers = append(markers, activityMonthMarker{
+			Label:  day.Date.Format("Jan"),
+			Column: (offset+i)/7 + 1,
+		})
+	}
+	return markers
+}
+
+func startsSessionMonth(items []domain.Session, index int) bool {
+	if index <= 0 {
+		return index == 0 && len(items) > 0
+	}
+	current, previous := items[index].PerformedOn, items[index-1].PerformedOn
+	return current.Year() != previous.Year() || current.Month() != previous.Month()
+}
+
+func sessionMonth(value time.Time) string { return value.Format("January 2006") }
 func formatName(value string) string {
 	return map[string]string{"sets_reps": "Sets × reps", "emom": "EMOM", "mixed": "Mixed formats"}[value]
 }

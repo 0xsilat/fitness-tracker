@@ -172,7 +172,7 @@ func (s *Store) Sessions(ctx context.Context, limit int) ([]domain.Session, erro
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id,routine_id,workout_id,routine_name,workout_name,format,status,performed_on,started_at,completed_at,notes,rpe FROM sessions ORDER BY CASE WHEN status='draft' THEN 0 ELSE 1 END,performed_on DESC,coalesce(completed_at,started_at) DESC LIMIT $1`, limit)
+	rows, err := s.pool.Query(ctx, `SELECT id,routine_id,workout_id,routine_name,workout_name,format,status,performed_on,started_at,completed_at,notes,rpe FROM sessions ORDER BY performed_on DESC,CASE WHEN status='draft' THEN 0 ELSE 1 END,coalesce(completed_at,started_at) DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -206,6 +206,21 @@ func (s *Store) WorkoutGroups(ctx context.Context) ([]domain.WorkoutGroup, error
 	return groups, nil
 }
 
+type dashboardWindow struct {
+	Today, Start7, Start30, Start90, Start365 time.Time
+}
+
+func dashboardWindowFor(now time.Time) dashboardWindow {
+	today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	return dashboardWindow{
+		Today:    today,
+		Start7:   today.AddDate(0, 0, -6),
+		Start30:  today.AddDate(0, 0, -29),
+		Start90:  today.AddDate(0, 0, -89),
+		Start365: today.AddDate(0, 0, -364),
+	}
+}
+
 func (s *Store) Dashboard(ctx context.Context) (domain.Dashboard, error) {
 	var d domain.Dashboard
 	var activeID int64
@@ -227,7 +242,7 @@ func (s *Store) Dashboard(ctx context.Context) (domain.Dashboard, error) {
 		_ = s.pool.QueryRow(ctx, `SELECT s.workout_id FROM sessions s JOIN workouts w ON w.id=s.workout_id WHERE s.routine_id=$1 AND s.status='completed' ORDER BY s.performed_on DESC,s.completed_at DESC LIMIT 1`, activeID).Scan(&last)
 		d.NextWorkout = domain.NextWorkout(d.Workouts, last)
 	}
-	all, err := s.Sessions(ctx, 8)
+	all, err := s.Sessions(ctx, 100)
 	if err != nil {
 		return d, err
 	}
@@ -238,8 +253,33 @@ func (s *Store) Dashboard(ctx context.Context) (domain.Dashboard, error) {
 			d.Recent = append(d.Recent, session)
 		}
 	}
-	week := time.Now()
-	week = time.Date(week.Year(), week.Month(), week.Day(), 0, 0, 0, 0, week.Location()).AddDate(0, 0, -6)
-	_ = s.pool.QueryRow(ctx, `SELECT count(*) FROM sessions WHERE status='completed' AND performed_on >= $1::date`, week).Scan(&d.SessionsThisWeek)
+	window := dashboardWindowFor(time.Now())
+	err = s.pool.QueryRow(ctx, `SELECT
+		count(*) FILTER (WHERE performed_on BETWEEN $2::date AND $1::date),
+		count(*) FILTER (WHERE performed_on BETWEEN $3::date AND $1::date),
+		count(*) FILTER (WHERE performed_on BETWEEN $4::date AND $1::date)
+		FROM sessions WHERE status='completed'`, window.Today, window.Start7, window.Start30, window.Start90).Scan(&d.SessionCount7, &d.SessionCount30, &d.SessionCount90)
+	if err != nil {
+		return d, err
+	}
+	d.SessionsThisWeek = d.SessionCount7
+	rows, err := s.pool.Query(ctx, `SELECT days.day, count(s.id)
+		FROM generate_series($2::date, $1::date, interval '1 day') AS days(day)
+		LEFT JOIN sessions s ON s.status='completed' AND s.performed_on=days.day
+		GROUP BY days.day ORDER BY days.day`, window.Today, window.Start365)
+	if err != nil {
+		return d, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var day domain.ActivityDay
+		if err = rows.Scan(&day.Date, &day.Sessions); err != nil {
+			return d, err
+		}
+		d.Activity = append(d.Activity, day)
+	}
+	if err = rows.Err(); err != nil {
+		return d, err
+	}
 	return d, nil
 }
