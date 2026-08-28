@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/a-h/templ"
 	"github.com/local/fitness-tracker/internal/domain"
@@ -39,6 +40,7 @@ func New(db *store.Store) http.Handler {
 	mux.HandleFunc("POST /workouts/{id}/delete", s.deleteWorkout)
 	mux.HandleFunc("POST /workouts/{id}/start", s.startSession)
 	mux.HandleFunc("GET /sessions", s.sessions)
+	mux.HandleFunc("POST /sessions", s.createSession)
 	mux.HandleFunc("GET /sessions/{id}", s.session)
 	mux.HandleFunc("POST /sessions/{id}/save", s.saveSession)
 	mux.HandleFunc("POST /sessions/{id}/sets", s.addSet)
@@ -342,12 +344,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	sessionID, err := s.db.StartSession(r.Context(), id)
-	if err != nil {
-		s.fail(w, r, err)
-		return
-	}
-	redirect(w, r, fmt.Sprintf("/sessions/%d", sessionID))
+	redirect(w, r, fmt.Sprintf("/sessions?new=1&workout_id=%d", id))
 }
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	items, err := s.db.Sessions(r.Context(), 100)
@@ -355,7 +352,49 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	s.render(w, r, SessionsPage(items))
+	selectedWorkoutID, _ := strconv.ParseInt(r.URL.Query().Get("workout_id"), 10, 64)
+	showNewForm := r.URL.Query().Get("new") == "1"
+	var groups []domain.WorkoutGroup
+	if showNewForm {
+		groups, err = s.db.WorkoutGroups(r.Context())
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+	}
+	s.render(w, r, SessionsPage(items, groups, showNewForm, selectedWorkoutID, time.Now()))
+}
+func parsePerformedOn(text string) (time.Time, error) {
+	if strings.TrimSpace(text) == "" {
+		return time.Time{}, errors.New("performed date is required")
+	}
+	value, err := time.Parse("2006-01-02", text)
+	if err != nil {
+		return time.Time{}, errors.New("performed date must be a valid date")
+	}
+	return value, nil
+}
+func (s *Server) createSession(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	workoutID, err := strconv.ParseInt(r.FormValue("workout_id"), 10, 64)
+	if err != nil || workoutID <= 0 {
+		s.fail(w, r, errors.New("choose a workout"))
+		return
+	}
+	performedOn, err := parsePerformedOn(r.FormValue("performed_on"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	sessionID, err := s.db.StartSession(r.Context(), workoutID, performedOn)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	redirect(w, r, fmt.Sprintf("/sessions/%d", sessionID))
 }
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
