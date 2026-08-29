@@ -111,7 +111,7 @@ func skippedClass(skipped bool) string {
 	}
 	return "set-row"
 }
-func sessionRowClass(mode string, skipped bool) string {
+func sessionRowClass(mode string, skipped, deletable bool) string {
 	value := "set-row"
 	if mode == "bodyweight" {
 		value += " bodyweight"
@@ -119,13 +119,20 @@ func sessionRowClass(mode string, skipped bool) string {
 	if skipped {
 		value += " skipped"
 	}
+	if deletable {
+		value += " deletable"
+	}
 	return value
 }
-func sessionHeaderClass(mode string) string {
+func sessionHeaderClass(mode string, deletable bool) string {
+	value := "set-row header"
 	if mode == "bodyweight" {
-		return "set-row header bodyweight"
+		value += " bodyweight"
 	}
-	return "set-row header"
+	if deletable {
+		value += " deletable"
+	}
+	return value
 }
 func rpeValue(value *int) string {
 	if value == nil {
@@ -139,12 +146,21 @@ func actualRepsValue(value int) string {
 	}
 	return fmt.Sprintf("%d", value)
 }
+func completedExerciseSets(exercise domain.SessionExercise) int {
+	count := 0
+	for _, set := range exercise.Sets {
+		if set.Reps > 0 && !set.Skipped {
+			count++
+		}
+	}
+	return count
+}
 func setMarker(format string, set domain.SessionSet) string {
 	if format == "emom" {
 		if set.Minute > 0 {
 			return fmt.Sprintf("%d", set.Minute)
 		}
-		return "Extra"
+		return fmt.Sprintf("%d", set.Position)
 	}
 	return fmt.Sprintf("%d", set.Position)
 }

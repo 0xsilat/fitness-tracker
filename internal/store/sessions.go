@@ -58,7 +58,7 @@ func (s *Store) StartSession(ctx context.Context, workoutID int64, performedOn t
 func (s *Store) Session(ctx context.Context, id int64) (domain.Session, []domain.SessionExercise, error) {
 	var out domain.Session
 	var raw []byte
-	err := s.pool.QueryRow(ctx, `SELECT id,routine_id,workout_id,routine_name,workout_name,format,status,performed_on,started_at,completed_at,notes,rpe,prescription_snapshot FROM sessions WHERE id=$1`, id).Scan(&out.ID, &out.RoutineID, &out.WorkoutID, &out.RoutineName, &out.WorkoutName, &out.Format, &out.Status, &out.PerformedOn, &out.StartedAt, &out.CompletedAt, &out.Notes, &out.RPE, &raw)
+	err := s.pool.QueryRow(ctx, `SELECT s.id,s.routine_id,s.workout_id,s.routine_name,s.workout_name,s.format,s.status,s.performed_on,s.started_at,s.completed_at,s.notes,s.rpe,(SELECT count(*) FROM session_exercises se JOIN session_sets ss ON ss.session_exercise_id=se.id WHERE se.session_id=s.id AND ss.reps>0 AND NOT ss.skipped),s.prescription_snapshot FROM sessions s WHERE s.id=$1`, id).Scan(&out.ID, &out.RoutineID, &out.WorkoutID, &out.RoutineName, &out.WorkoutName, &out.Format, &out.Status, &out.PerformedOn, &out.StartedAt, &out.CompletedAt, &out.Notes, &out.RPE, &out.CompletedSets, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return out, nil, ErrNotFound
 	}
@@ -103,16 +103,31 @@ type SetUpdate struct {
 	Skipped  bool
 }
 
-func (s *Store) SaveDraft(ctx context.Context, id int64, notes string, rpe *int, updates []SetUpdate) error {
+func validateSessionChanges(rpe *int, updates []SetUpdate) error {
 	if rpe != nil && (*rpe < 1 || *rpe > 10) {
 		return errors.New("effort must be between 1 and 10")
+	}
+	for _, u := range updates {
+		if u.Reps < 0 || u.WeightKG < 0 {
+			return errors.New("reps and weight cannot be negative")
+		}
+	}
+	return nil
+}
+
+func (s *Store) SaveDraft(ctx context.Context, id int64, performedOn time.Time, notes string, rpe *int, updates []SetUpdate) error {
+	if performedOn.IsZero() {
+		return errors.New("performed date is required")
+	}
+	if err := validateSessionChanges(rpe, updates); err != nil {
+		return err
 	}
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	result, err := tx.Exec(ctx, `UPDATE sessions SET notes=$2,rpe=$3 WHERE id=$1 AND status='draft'`, id, notes, rpe)
+	result, err := tx.Exec(ctx, `UPDATE sessions SET performed_on=$2,notes=$3,rpe=$4 WHERE id=$1 AND status='draft'`, id, performedOn, notes, rpe)
 	if err != nil {
 		return err
 	}
@@ -120,11 +135,41 @@ func (s *Store) SaveDraft(ctx context.Context, id int64, notes string, rpe *int,
 		return errors.New("completed sessions cannot be edited")
 	}
 	for _, u := range updates {
-		if u.Reps < 0 || u.WeightKG < 0 {
-			return errors.New("reps and weight cannot be negative")
-		}
 		if _, err = tx.Exec(ctx, `UPDATE session_sets ss SET reps=$2,weight_kg=$3,skipped=$4 FROM session_exercises se WHERE ss.id=$1 AND ss.session_exercise_id=se.id AND se.session_id=$5`, u.ID, u.Reps, u.WeightKG, u.Skipped, id); err != nil {
 			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// UpdateCompletedSession corrects the user-entered fields on an existing log
+// entry while retaining its original workout and prescription snapshot.
+func (s *Store) UpdateCompletedSession(ctx context.Context, id int64, performedOn time.Time, notes string, rpe *int, updates []SetUpdate) error {
+	if performedOn.IsZero() {
+		return errors.New("performed date is required")
+	}
+	if err := validateSessionChanges(rpe, updates); err != nil {
+		return err
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	result, err := tx.Exec(ctx, `UPDATE sessions SET performed_on=$2,notes=$3,rpe=$4 WHERE id=$1 AND status='completed'`, id, performedOn, notes, rpe)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	for _, u := range updates {
+		result, err = tx.Exec(ctx, `UPDATE session_sets ss SET reps=$2,weight_kg=$3,skipped=$4 FROM session_exercises se WHERE ss.id=$1 AND ss.session_exercise_id=se.id AND se.session_id=$5`, u.ID, u.Reps, u.WeightKG, u.Skipped, id)
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() == 0 {
+			return ErrNotFound
 		}
 	}
 	return tx.Commit(ctx)
@@ -139,6 +184,36 @@ func (s *Store) AddSessionSet(ctx context.Context, sessionID, sessionExerciseID 
 		return ErrNotFound
 	}
 	return nil
+}
+
+// DeleteSessionSet removes a set from either a draft or completed session and
+// closes the position gap. Every exercise must retain at least one set.
+func (s *Store) DeleteSessionSet(ctx context.Context, sessionID, setID int64) (int64, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	var exerciseID int64
+	var position, count int
+	err = tx.QueryRow(ctx, `SELECT ss.session_exercise_id,ss.position,(SELECT count(*) FROM session_sets siblings WHERE siblings.session_exercise_id=ss.session_exercise_id) FROM session_sets ss JOIN session_exercises se ON se.id=ss.session_exercise_id JOIN sessions s ON s.id=se.session_id WHERE ss.id=$2 AND s.id=$1 AND s.status IN ('draft','completed') FOR UPDATE OF ss`, sessionID, setID).Scan(&exerciseID, &position, &count)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	if count <= 1 {
+		return 0, errors.New("each exercise must retain at least one set")
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM session_sets WHERE id=$1`, setID); err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE session_sets SET position=position-1 WHERE session_exercise_id=$1 AND position>$2`, exerciseID, position); err != nil {
+		return 0, err
+	}
+	return exerciseID, tx.Commit(ctx)
 }
 
 func (s *Store) CompleteSession(ctx context.Context, id int64) error {
@@ -172,7 +247,7 @@ func (s *Store) Sessions(ctx context.Context, limit int) ([]domain.Session, erro
 	if limit <= 0 {
 		limit = 100
 	}
-	rows, err := s.pool.Query(ctx, `SELECT id,routine_id,workout_id,routine_name,workout_name,format,status,performed_on,started_at,completed_at,notes,rpe FROM sessions ORDER BY performed_on DESC,CASE WHEN status='draft' THEN 0 ELSE 1 END,coalesce(completed_at,started_at) DESC LIMIT $1`, limit)
+	rows, err := s.pool.Query(ctx, `SELECT s.id,s.routine_id,s.workout_id,s.routine_name,s.workout_name,s.format,s.status,s.performed_on,s.started_at,s.completed_at,s.notes,s.rpe,(SELECT count(*) FROM session_exercises se JOIN session_sets ss ON ss.session_exercise_id=se.id WHERE se.session_id=s.id AND ss.reps>0 AND NOT ss.skipped) FROM sessions s ORDER BY s.performed_on DESC,CASE WHEN s.status='draft' THEN 0 ELSE 1 END,coalesce(s.completed_at,s.started_at) DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +255,7 @@ func (s *Store) Sessions(ctx context.Context, limit int) ([]domain.Session, erro
 	var out []domain.Session
 	for rows.Next() {
 		var x domain.Session
-		if err := rows.Scan(&x.ID, &x.RoutineID, &x.WorkoutID, &x.RoutineName, &x.WorkoutName, &x.Format, &x.Status, &x.PerformedOn, &x.StartedAt, &x.CompletedAt, &x.Notes, &x.RPE); err != nil {
+		if err := rows.Scan(&x.ID, &x.RoutineID, &x.WorkoutID, &x.RoutineName, &x.WorkoutName, &x.Format, &x.Status, &x.PerformedOn, &x.StartedAt, &x.CompletedAt, &x.Notes, &x.RPE, &x.CompletedSets); err != nil {
 			return nil, err
 		}
 		out = append(out, x)

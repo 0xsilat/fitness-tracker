@@ -43,7 +43,9 @@ func New(db *store.Store) http.Handler {
 	mux.HandleFunc("POST /sessions", s.createSession)
 	mux.HandleFunc("GET /sessions/{id}", s.session)
 	mux.HandleFunc("POST /sessions/{id}/save", s.saveSession)
+	mux.HandleFunc("POST /sessions/{id}/update", s.updateSession)
 	mux.HandleFunc("POST /sessions/{id}/sets", s.addSet)
+	mux.HandleFunc("POST /sessions/{id}/sets/{setID}/delete", s.deleteSet)
 	mux.HandleFunc("POST /sessions/{id}/complete", s.completeSession)
 	mux.HandleFunc("POST /sessions/{id}/discard", s.discardSession)
 	mux.HandleFunc("POST /sessions/{id}/delete", s.deleteSession)
@@ -407,7 +409,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	s.render(w, r, SessionPage(session, exercises))
+	s.render(w, r, SessionPage(session, exercises, r.URL.Query().Get("edit") == "1"))
 }
 func parseSetUpdates(r *http.Request) []store.SetUpdate {
 	var out []store.SetUpdate
@@ -434,6 +436,11 @@ func (s *Server) saveSession(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	performedOn, err := parsePerformedOn(r.FormValue("performed_on"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	var rpe *int
 	if text := r.FormValue("rpe"); text != "" {
 		v, e := strconv.Atoi(text)
@@ -443,12 +450,41 @@ func (s *Server) saveSession(w http.ResponseWriter, r *http.Request) {
 		}
 		rpe = &v
 	}
-	if err = s.db.SaveDraft(r.Context(), id, r.FormValue("notes"), rpe, parseSetUpdates(r)); err != nil {
+	if err = s.db.SaveDraft(r.Context(), id, performedOn, r.FormValue("notes"), rpe, parseSetUpdates(r)); err != nil {
 		s.fail(w, r, err)
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" {
 		s.render(w, r, SaveStatus())
+		return
+	}
+	redirect(w, r, fmt.Sprintf("/sessions/%d", id))
+}
+
+func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err == nil {
+		err = r.ParseForm()
+	}
+	performedOn := time.Time{}
+	if err == nil {
+		performedOn, err = parsePerformedOn(r.FormValue("performed_on"))
+	}
+	var rpe *int
+	if err == nil {
+		if text := r.FormValue("rpe"); text != "" {
+			var value int
+			value, err = strconv.Atoi(text)
+			if err == nil {
+				rpe = &value
+			}
+		}
+	}
+	if err == nil {
+		err = s.db.UpdateCompletedSession(r.Context(), id, performedOn, r.FormValue("notes"), rpe, parseSetUpdates(r))
+	}
+	if err != nil {
+		s.fail(w, r, err)
 		return
 	}
 	redirect(w, r, fmt.Sprintf("/sessions/%d", id))
@@ -463,6 +499,11 @@ func (s *Server) addSet(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
+	performedOn, err := parsePerformedOn(r.FormValue("performed_on"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
 	var rpe *int
 	if text := r.FormValue("rpe"); text != "" {
 		v, e := strconv.Atoi(text)
@@ -472,7 +513,7 @@ func (s *Server) addSet(w http.ResponseWriter, r *http.Request) {
 		}
 		rpe = &v
 	}
-	if err = s.db.SaveDraft(r.Context(), id, r.FormValue("notes"), rpe, parseSetUpdates(r)); err != nil {
+	if err = s.db.SaveDraft(r.Context(), id, performedOn, r.FormValue("notes"), rpe, parseSetUpdates(r)); err != nil {
 		s.fail(w, r, err)
 		return
 	}
@@ -481,7 +522,88 @@ func (s *Server) addSet(w http.ResponseWriter, r *http.Request) {
 		s.fail(w, r, err)
 		return
 	}
-	redirect(w, r, fmt.Sprintf("/sessions/%d", id))
+	if r.Header.Get("HX-Request") == "true" {
+		s.renderSessionExerciseUpdate(w, r, id, exerciseID, true, true)
+		return
+	}
+	redirect(w, r, fmt.Sprintf("/sessions/%d#exercise-%d", id, exerciseID))
+}
+
+func (s *Server) deleteSet(w http.ResponseWriter, r *http.Request) {
+	id, err := idParam(r, "id")
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	setID, err := idParam(r, "setID")
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if err = r.ParseForm(); err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	session, _, err := s.db.Session(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	performedOn, err := parsePerformedOn(r.FormValue("performed_on"))
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	var rpe *int
+	if text := r.FormValue("rpe"); text != "" {
+		value, parseErr := strconv.Atoi(text)
+		if parseErr != nil {
+			s.fail(w, r, parseErr)
+			return
+		}
+		rpe = &value
+	}
+	updates := parseSetUpdates(r)
+	if session.Status == "draft" {
+		err = s.db.SaveDraft(r.Context(), id, performedOn, r.FormValue("notes"), rpe, updates)
+	} else if session.Status == "completed" {
+		err = s.db.UpdateCompletedSession(r.Context(), id, performedOn, r.FormValue("notes"), rpe, updates)
+	} else {
+		err = store.ErrNotFound
+	}
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	exerciseID, err := s.db.DeleteSessionSet(r.Context(), id, setID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if r.Header.Get("HX-Request") == "true" {
+		s.renderSessionExerciseUpdate(w, r, id, exerciseID, true, session.Status == "draft")
+		return
+	}
+	target := fmt.Sprintf("/sessions/%d#exercise-%d", id, exerciseID)
+	if session.Status == "completed" {
+		target = fmt.Sprintf("/sessions/%d?edit=1#exercise-%d", id, exerciseID)
+	}
+	redirect(w, r, target)
+}
+
+func (s *Server) renderSessionExerciseUpdate(w http.ResponseWriter, r *http.Request, sessionID, exerciseID int64, editable, addable bool) {
+	session, exercises, err := s.db.Session(r.Context(), sessionID)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	for _, exercise := range exercises {
+		if exercise.ID == exerciseID {
+			s.render(w, r, SessionExerciseUpdate(exercises, editable, addable, session.CompletedSets))
+			return
+		}
+	}
+	s.fail(w, r, store.ErrNotFound)
 }
 func (s *Server) completeSession(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
@@ -489,12 +611,18 @@ func (s *Server) completeSession(w http.ResponseWriter, r *http.Request) {
 		err = r.ParseForm()
 	}
 	if err == nil {
+		var performedOn time.Time
+		performedOn, err = parsePerformedOn(r.FormValue("performed_on"))
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
 		var rpe *int
 		if text := r.FormValue("rpe"); text != "" {
 			v, _ := strconv.Atoi(text)
 			rpe = &v
 		}
-		err = s.db.SaveDraft(r.Context(), id, r.FormValue("notes"), rpe, parseSetUpdates(r))
+		err = s.db.SaveDraft(r.Context(), id, performedOn, r.FormValue("notes"), rpe, parseSetUpdates(r))
 	}
 	if err == nil {
 		err = s.db.CompleteSession(r.Context(), id)
