@@ -34,6 +34,6 @@ The default development database URL is `postgres://fitness:fitness@localhost:54
 - Deletable workout days that preserve completed-session history
 - Per-exercise sets × reps and EMOM blocks, freely mixed within one workout day
 - Optional rep targets that never limit or overwrite the actual reps logged in a session
-- Autosaved workout drafts and immutable completed-session snapshots
+- Autosaved workout drafts and editable completed-session logs backed by stable workout snapshots
 - Routine consistency and routine-independent per-exercise progress analytics
 - Exercise-specific weighted volume (kg·reps) and bodyweight rep tracking

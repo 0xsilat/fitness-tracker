@@ -13,7 +13,7 @@ templ Layout(title string) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title } · Tempo</title>
-			<link rel="stylesheet" href="/static/app.css?v=20260828-mobile-set-columns"/>
+			<link rel="stylesheet" href="/static/app.css?v=20260829-set-controls"/>
 			<script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotkmshcpmSSjZ2fLJm8aTTpYo804Arnaaj5i9IF40ZBrAqBBZJNGbc/HP" crossorigin="anonymous"></script>
 			<script src="/static/app.js" defer></script>
 		</head>
@@ -78,7 +78,7 @@ templ ActivityCalendar(days []domain.ActivityDay) {
 	</div>
 }
 
-templ SessionRow(x domain.Session) { <a class="session-row" href={ templ.SafeURL(fmt.Sprintf("/sessions/%d",x.ID)) }><strong>{ x.WorkoutName }</strong><time datetime={ inputDate(x.PerformedOn) }>{ date(x.PerformedOn) }</time><span class={ "status "+x.Status }>{ x.Status }</span><span class="row-chevron" aria-hidden="true">›</span></a> }
+templ SessionRow(x domain.Session) { <a class="session-row" href={ templ.SafeURL(fmt.Sprintf("/sessions/%d",x.ID)) }><span class="session-row-title"><strong>{ x.WorkoutName }</strong><small>{ fmt.Sprintf("%d sets done",x.CompletedSets) }</small></span><time datetime={ inputDate(x.PerformedOn) }>{ date(x.PerformedOn) }</time><span class={ "status "+x.Status }>{ x.Status }</span><span class="row-chevron" aria-hidden="true">›</span></a> }
 
 templ ExercisesPage(items []domain.Exercise,showArchived bool) {
 	@Layout("Exercises") {
@@ -225,20 +225,33 @@ templ SessionsPage(items []domain.Session,groups []domain.WorkoutGroup,showNewFo
 	}
 }
 
-templ SessionPage(s domain.Session,exercises []domain.SessionExercise) {
+templ SessionPage(s domain.Session,exercises []domain.SessionExercise,editing bool) {
 	@Layout(s.WorkoutName) {
 		<a class="back" href="/sessions">← Log workouts</a>
-		@PageHeader(s.RoutineName,s.WorkoutName,formatName(s.Format)+" · Performed "+date(s.PerformedOn)) { <span class={ "status "+s.Status }>{ s.Status }</span> }
+		@PageHeader(s.RoutineName,s.WorkoutName,formatName(s.Format)+" · Performed "+date(s.PerformedOn)) {
+			<span class={ "status "+s.Status }>{ s.Status }</span>
+			@SessionSetCount(s.CompletedSets,false)
+			if s.Status == "completed" && !editing {
+				<a class="button secondary" href={ templ.SafeURL(fmt.Sprintf("/sessions/%d?edit=1",s.ID)) }>Edit entry</a>
+			}
+		}
 		if s.Status=="draft" {
 			<form class="session-form" method="post" action={ fmt.Sprintf("/sessions/%d/save",s.ID) } hx-post={ fmt.Sprintf("/sessions/%d/save",s.ID) } hx-trigger="change delay:500ms" hx-target="#save-status" hx-swap="outerHTML">
-				@SessionExercises(exercises,true)
+				<div class="panel session-draft-date"><label>Date performed<input name="performed_on" type="date" value={ inputDate(s.PerformedOn) } required/></label></div>
+				@SessionExercises(exercises,true,true)
 				<div class="panel session-notes"><label>Session notes<textarea name="notes" rows="4" placeholder="How did it feel?">{ s.Notes }</textarea></label><label>Effort (RPE)<input name="rpe" type="number" min="1" max="10" value={ rpeValue(s.RPE) } placeholder="1–10"/></label></div>
 				<div class="sticky-actions"><span id="save-status" class="save-status">Draft autosaves</span><button class="button secondary" type="submit">Save draft</button><button class="button primary" type="submit" formaction={ fmt.Sprintf("/sessions/%d/complete",s.ID) } hx-post={ fmt.Sprintf("/sessions/%d/complete",s.ID) }>Complete workout</button></div>
 			</form>
 			<form method="post" action={ fmt.Sprintf("/sessions/%d/discard",s.ID) } onsubmit="return confirm('Discard this draft?')"><button class="text-button danger">Discard draft</button></form>
+		} else if editing {
+			<form class="session-form" method="post" action={ fmt.Sprintf("/sessions/%d/update",s.ID) }>
+				<div class="panel session-edit-details"><label>Date performed<input name="performed_on" type="date" value={ inputDate(s.PerformedOn) } required/></label><label>Session notes<textarea name="notes" rows="4" placeholder="How did it feel?">{ s.Notes }</textarea></label><label>Effort (RPE)<input name="rpe" type="number" min="1" max="10" value={ rpeValue(s.RPE) } placeholder="1–10"/></label></div>
+				@SessionExercises(exercises,true,false)
+				<div class="sticky-actions"><a class="button secondary" href={ templ.SafeURL(fmt.Sprintf("/sessions/%d",s.ID)) }>Cancel</a><button class="button primary" type="submit">Save changes</button></div>
+			</form>
 		} else {
-			@SessionExercises(exercises,false)
-			if s.Notes != "" {
+			@SessionExercises(exercises,false,false)
+			if s.Notes != "" || s.RPE != nil {
 				<section class="panel"><h2>Notes</h2><p>{ s.Notes }</p>
 					if s.RPE != nil {
 						<p><strong>RPE { fmt.Sprintf("%d",*s.RPE) }/10</strong></p>
@@ -250,18 +263,22 @@ templ SessionPage(s domain.Session,exercises []domain.SessionExercise) {
 	}
 }
 
-templ SessionExercises(exercises []domain.SessionExercise,editable bool) {
+templ SessionExercises(exercises []domain.SessionExercise,editable bool,addable bool) {
 	<div class="movement-list">
 		for _, e := range exercises {
-			<article class="movement"><div class="movement-head"><div><span class="eyebrow">{ formatName(e.Format) }</span><h2>{ e.Name }</h2><small>{ e.Mode }
+			<article id={ fmt.Sprintf("exercise-%d",e.ID) } class="movement"><div class="movement-head"><div><span class="eyebrow">{ formatName(e.Format) }</span><h2>{ e.Name }</h2><small>{ e.Mode }
 				if e.Format == "emom" {
-					<span> · { fmt.Sprintf("%d minutes",e.DurationMinutes) }</span>
+					if addable {
+						<span> · { fmt.Sprintf("%d planned minutes",e.DurationMinutes) }</span>
+					} else {
+						<span> · { fmt.Sprintf("%d minutes done",completedExerciseSets(e)) }</span>
+					}
 				}
 			</small></div>
-				if editable {
-					<button class="button ghost" type="submit" formaction={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } hx-post={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } name="session_exercise_id" value={ fmt.Sprintf("%d",e.ID) }>+ Set</button>
+				if addable {
+					<button class="button ghost" type="submit" formaction={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } hx-post={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } hx-target="closest .movement-list" hx-swap="outerHTML show:none" name="session_exercise_id" value={ fmt.Sprintf("%d",e.ID) }>+ Set</button>
 				}
-			</div><div class="set-table"><div class={ sessionHeaderClass(e.Mode) }>
+			</div><div class="set-table"><div class={ sessionHeaderClass(e.Mode,editable && len(e.Sets)>1) }>
 				if e.Format == "emom" {
 					<span>Minute</span>
 				} else {
@@ -271,9 +288,13 @@ templ SessionExercises(exercises []domain.SessionExercise,editable bool) {
 				if e.Mode == "weighted" {
 					<span>Weight</span>
 				}
-				<span>Skip</span></div>
+				<span>Skip</span>
+				if editable && len(e.Sets)>1 {
+					<span class="visually-hidden">Delete</span>
+				}
+			</div>
 				for _, set := range e.Sets {
-					<div class={ sessionRowClass(e.Mode,set.Skipped) }><strong>{ setMarker(e.Format,set) }</strong>
+					<div class={ sessionRowClass(e.Mode,set.Skipped,editable && len(e.Sets)>1) }><strong>{ setMarker(e.Format,set) }</strong>
 						if editable {
 							<label class="actual-input"><input aria-label="Actual reps" name={ fmt.Sprintf("reps_%d",set.ID) } type="number" inputmode="numeric" min="0" value={ actualRepsValue(set.Reps) } placeholder="Reps"/>
 								if set.TargetReps != nil {
@@ -284,6 +305,9 @@ templ SessionExercises(exercises []domain.SessionExercise,editable bool) {
 								<label class="weight-input"><input aria-label="Weight in kilograms" name={ fmt.Sprintf("weight_%d",set.ID) } type="number" min="0" step="0.25" value={ number(set.WeightKG) }/><span>kg</span></label>
 							}
 							<input aria-label="Skip set" name={ fmt.Sprintf("skipped_%d",set.ID) } type="checkbox" checked?={ set.Skipped }/>
+							if len(e.Sets)>1 {
+								<button class="icon-button danger set-delete" type="submit" aria-label={ fmt.Sprintf("Delete set %d",set.Position) } title="Delete set" formaction={ fmt.Sprintf("/sessions/%d/sets/%d/delete",e.SessionID,set.ID) } hx-post={ fmt.Sprintf("/sessions/%d/sets/%d/delete",e.SessionID,set.ID) } hx-target="closest .movement-list" hx-swap="outerHTML show:none">×</button>
+							}
 						} else {
 							<span>{ fmt.Sprintf("%d",set.Reps) }</span>
 							if e.Mode == "weighted" {
@@ -300,6 +324,19 @@ templ SessionExercises(exercises []domain.SessionExercise,editable bool) {
 			</div></article>
 		}
 	</div>
+}
+
+templ SessionExerciseUpdate(exercises []domain.SessionExercise,editable bool,addable bool,completedSets int) {
+	@SessionExercises(exercises,editable,addable)
+	@SessionSetCount(completedSets,true)
+}
+
+templ SessionSetCount(count int,outOfBand bool) {
+	if outOfBand {
+		<span id="session-set-count" class="session-set-count" hx-swap-oob="true">{ fmt.Sprintf("%d sets done",count) }</span>
+	} else {
+		<span id="session-set-count" class="session-set-count">{ fmt.Sprintf("%d sets done",count) }</span>
+	}
 }
 
 templ SaveStatus() { <span id="save-status" class="save-status saved">Saved just now</span> }

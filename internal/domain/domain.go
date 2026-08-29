@@ -55,19 +55,20 @@ type Workout struct {
 }
 
 type Session struct {
-	ID          int64
-	RoutineID   int64
-	WorkoutID   *int64
-	RoutineName string
-	WorkoutName string
-	Format      string
-	Status      string
-	PerformedOn time.Time
-	StartedAt   time.Time
-	CompletedAt *time.Time
-	Notes       string
-	RPE         *int
-	Snapshot    Prescription
+	ID            int64
+	RoutineID     int64
+	WorkoutID     *int64
+	RoutineName   string
+	WorkoutName   string
+	Format        string
+	Status        string
+	PerformedOn   time.Time
+	StartedAt     time.Time
+	CompletedAt   *time.Time
+	Notes         string
+	RPE           *int
+	CompletedSets int
+	Snapshot      Prescription
 }
 
 // WorkoutGroup is a routine and its workout templates, used when choosing a
