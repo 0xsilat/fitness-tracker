@@ -43,6 +43,7 @@ func New(db *store.Store) http.Handler {
 	mux.HandleFunc("POST /sessions", s.createSession)
 	mux.HandleFunc("GET /sessions/{id}", s.session)
 	mux.HandleFunc("POST /sessions/{id}/save", s.saveSession)
+	mux.HandleFunc("POST /sessions/{id}/exercises/{exerciseID}/emom", s.emomEntry)
 	mux.HandleFunc("POST /sessions/{id}/update", s.updateSession)
 	mux.HandleFunc("POST /sessions/{id}/sets", s.addSet)
 	mux.HandleFunc("POST /sessions/{id}/sets/{setID}/delete", s.deleteSet)
@@ -455,7 +456,12 @@ func (s *Server) saveSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" {
-		s.render(w, r, SaveStatus())
+		session, exercises, err := s.db.Session(r.Context(), id)
+		if err != nil {
+			s.fail(w, r, err)
+			return
+		}
+		s.render(w, r, SessionSaved(exercises, session.CompletedSets))
 		return
 	}
 	redirect(w, r, fmt.Sprintf("/sessions/%d", id))
@@ -523,7 +529,7 @@ func (s *Server) addSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" {
-		s.renderSessionExerciseUpdate(w, r, id, exerciseID, true, true)
+		s.renderSessionExerciseUpdate(w, r, id, exerciseID, true)
 		return
 	}
 	redirect(w, r, fmt.Sprintf("/sessions/%d#exercise-%d", id, exerciseID))
@@ -581,7 +587,7 @@ func (s *Server) deleteSet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Header.Get("HX-Request") == "true" {
-		s.renderSessionExerciseUpdate(w, r, id, exerciseID, true, session.Status == "draft")
+		s.renderSessionExerciseUpdate(w, r, id, exerciseID, session.Status == "draft")
 		return
 	}
 	target := fmt.Sprintf("/sessions/%d#exercise-%d", id, exerciseID)
@@ -591,7 +597,7 @@ func (s *Server) deleteSet(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, target)
 }
 
-func (s *Server) renderSessionExerciseUpdate(w http.ResponseWriter, r *http.Request, sessionID, exerciseID int64, editable, addable bool) {
+func (s *Server) renderSessionExerciseUpdate(w http.ResponseWriter, r *http.Request, sessionID, exerciseID int64, addable bool) {
 	session, exercises, err := s.db.Session(r.Context(), sessionID)
 	if err != nil {
 		s.fail(w, r, err)
@@ -599,7 +605,12 @@ func (s *Server) renderSessionExerciseUpdate(w http.ResponseWriter, r *http.Requ
 	}
 	for _, exercise := range exercises {
 		if exercise.ID == exerciseID {
-			s.render(w, r, SessionExerciseUpdate(exercises, editable, addable, session.CompletedSets))
+			state := emomState(exercise, r.PostForm)
+			state.PreserveQuick = true
+			if r.PostForm.Get("session_exercise_id") != "" {
+				state.Open = true
+			}
+			s.render(w, r, SessionExerciseUpdate(exercise, state, addable, session.CompletedSets, addable))
 			return
 		}
 	}

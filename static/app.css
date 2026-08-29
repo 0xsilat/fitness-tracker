@@ -136,6 +136,26 @@ tr:last-child td { border-bottom: 0; }
 hr { margin: 18px 0; border: 0; border-top: 1px solid var(--line); }
 .session-start { max-width: 640px; }
 .session-form { margin-bottom: 16px; }
+.session-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.session-fields:disabled { cursor: progress; }
+.emom-quick { padding: 12px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); }
+.emom-quick-fields { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 10px; }
+.emom-quick-fields label { flex: 1 1 150px; }
+.emom-quick-fields button { flex: 0 1 auto; }
+.emom-quick p { margin: 9px 0 0; font-size: 12px; }
+.emom-feedback { color: var(--green); }
+.emom-feedback:empty { display: none; }
+.emom-confirm { margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+.emom-confirm p { margin: 0 0 10px; }
+.emom-summary { cursor: pointer; font-size: 13px; font-weight: 750; }
+.emom-summary span { display: block; margin-top: 5px; color: var(--muted); font-size: 12px; font-weight: 500; }
+.emom-toggle { width: 18px; height: 18px; display: inline-block; vertical-align: top; margin: 0 6px 0 0; }
+.emom-summary { display: inline-block; max-width: calc(100% - 30px); }
+.emom-minute-rows { margin-top: 14px; }
+.emom-toggle:not(:checked) ~ .emom-minute-rows { display: none; }
+.emom-details:has(.emom-minute-rows input:invalid) .emom-minute-rows { display: block; }
+.set-row:has(input[type=checkbox][name^="skipped_"]:checked) { opacity: .5; }
+.set-row.skipped:has(input[type=checkbox][name^="skipped_"]:not(:checked)) { opacity: 1; }
 .set-table { display: flex; flex-direction: column; gap: 6px; }
 .set-row { display: grid; grid-template-columns: 52px minmax(110px, 1fr) minmax(100px, 1fr) 52px; align-items: center; gap: 9px; }
 .set-row.deletable { grid-template-columns: 52px minmax(110px, 1fr) minmax(100px, 1fr) 52px 40px; }
@@ -204,6 +224,8 @@ footer { display: flex; justify-content: space-between; width: min(1060px, calc(
   .set-row.bodyweight { grid-template-columns: 56px minmax(0, 1fr) 42px; }
   .set-row.bodyweight.deletable { grid-template-columns: 48px minmax(0, 1fr) 36px 36px; }
   .session-notes, .session-edit-details { grid-template-columns: 1fr; }
+  .emom-quick-fields button { width: 100%; }
+  .emom-quick-fields label { flex-basis: 100%; }
   .sticky-actions { flex-wrap: wrap; }
   .save-status { width: 100%; }
   .page-heading .actions, .page-actions { flex-wrap: wrap; }

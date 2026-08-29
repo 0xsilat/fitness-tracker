@@ -13,9 +13,9 @@ templ Layout(title string) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title } · Tempo</title>
-			<link rel="stylesheet" href="/static/app.css?v=20260829-set-controls"/>
+			<link rel="stylesheet" href="/static/app.css?v=20260830-server-emom"/>
 			<script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotkmshcpmSSjZ2fLJm8aTTpYo804Arnaaj5i9IF40ZBrAqBBZJNGbc/HP" crossorigin="anonymous"></script>
-			<script src="/static/app.js" defer></script>
+			<script src="/static/app.js?v=20260830-server-emom" defer></script>
 		</head>
 		<body>
 			<header class="site-header">
@@ -226,6 +226,10 @@ templ SessionsPage(items []domain.Session,groups []domain.WorkoutGroup,showNewFo
 }
 
 templ SessionPage(s domain.Session,exercises []domain.SessionExercise,editing bool) {
+	@SessionPageWithState(s,exercises,editing,nil)
+}
+
+templ SessionPageWithState(s domain.Session,exercises []domain.SessionExercise,editing bool,states map[int64]emomEntryState) {
 	@Layout(s.WorkoutName) {
 		<a class="back" href="/sessions">← Log workouts</a>
 		@PageHeader(s.RoutineName,s.WorkoutName,formatName(s.Format)+" · Performed "+date(s.PerformedOn)) {
@@ -236,18 +240,22 @@ templ SessionPage(s domain.Session,exercises []domain.SessionExercise,editing bo
 			}
 		}
 		if s.Status=="draft" {
-			<form class="session-form" method="post" action={ fmt.Sprintf("/sessions/%d/save",s.ID) } hx-post={ fmt.Sprintf("/sessions/%d/save",s.ID) } hx-trigger="change delay:500ms" hx-target="#save-status" hx-swap="outerHTML">
+			<form id="session-form" class="session-form" method="post" action={ fmt.Sprintf("/sessions/%d/save",s.ID) } hx-post={ fmt.Sprintf("/sessions/%d/save",s.ID) } hx-trigger="submit" hx-target="#save-status" hx-swap="outerHTML" hx-sync="#session-form:queue all" hx-disabled-elt="#session-fields">
+				<fieldset id="session-fields" class="session-fields" hx-post={ fmt.Sprintf("/sessions/%d/save",s.ID) } hx-trigger="change[event.target.form && event.target.form.id === 'session-form'] delay:500ms" hx-validate="true">
 				<div class="panel session-draft-date"><label>Date performed<input name="performed_on" type="date" value={ inputDate(s.PerformedOn) } required/></label></div>
-				@SessionExercises(exercises,true,true)
+				@SessionExercisesWithState(exercises,true,true,states)
 				<div class="panel session-notes"><label>Session notes<textarea name="notes" rows="4" placeholder="How did it feel?">{ s.Notes }</textarea></label><label>Effort (RPE)<input name="rpe" type="number" min="1" max="10" value={ rpeValue(s.RPE) } placeholder="1–10"/></label></div>
 				<div class="sticky-actions"><span id="save-status" class="save-status">Draft autosaves</span><button class="button secondary" type="submit">Save draft</button><button class="button primary" type="submit" formaction={ fmt.Sprintf("/sessions/%d/complete",s.ID) } hx-post={ fmt.Sprintf("/sessions/%d/complete",s.ID) }>Complete workout</button></div>
+				</fieldset>
 			</form>
 			<form method="post" action={ fmt.Sprintf("/sessions/%d/discard",s.ID) } onsubmit="return confirm('Discard this draft?')"><button class="text-button danger">Discard draft</button></form>
 		} else if editing {
-			<form class="session-form" method="post" action={ fmt.Sprintf("/sessions/%d/update",s.ID) }>
+			<form id="session-form" class="session-form" method="post" action={ fmt.Sprintf("/sessions/%d/update",s.ID) } hx-post={ fmt.Sprintf("/sessions/%d/update",s.ID) } hx-sync="#session-form:queue all" hx-disabled-elt="#session-fields">
+				<fieldset id="session-fields" class="session-fields">
 				<div class="panel session-edit-details"><label>Date performed<input name="performed_on" type="date" value={ inputDate(s.PerformedOn) } required/></label><label>Session notes<textarea name="notes" rows="4" placeholder="How did it feel?">{ s.Notes }</textarea></label><label>Effort (RPE)<input name="rpe" type="number" min="1" max="10" value={ rpeValue(s.RPE) } placeholder="1–10"/></label></div>
-				@SessionExercises(exercises,true,false)
+				@SessionExercisesWithState(exercises,true,false,states)
 				<div class="sticky-actions"><a class="button secondary" href={ templ.SafeURL(fmt.Sprintf("/sessions/%d",s.ID)) }>Cancel</a><button class="button primary" type="submit">Save changes</button></div>
+				</fieldset>
 			</form>
 		} else {
 			@SessionExercises(exercises,false,false)
@@ -260,12 +268,26 @@ templ SessionPage(s domain.Session,exercises []domain.SessionExercise,editing bo
 			}
 			<form method="post" action={ fmt.Sprintf("/sessions/%d/delete",s.ID) } onsubmit="return confirm('Permanently delete this completed session?')"><button class="text-button danger">Delete session</button></form>
 		}
+		if s.Status == "draft" || editing {
+			@EMOMForms(exercises)
+			<noscript><style>.emom-quick { display: none; }</style></noscript>
+		}
 	}
 }
 
 templ SessionExercises(exercises []domain.SessionExercise,editable bool,addable bool) {
+	@SessionExercisesWithState(exercises,editable,addable,nil)
+}
+
+templ SessionExercisesWithState(exercises []domain.SessionExercise,editable bool,addable bool,states map[int64]emomEntryState) {
 	<div class="movement-list">
 		for _, e := range exercises {
+			@SessionExercise(e,editable,addable,emomStateFor(e,states))
+		}
+	</div>
+}
+
+templ SessionExercise(e domain.SessionExercise,editable bool,addable bool,state emomEntryState) {
 			<article id={ fmt.Sprintf("exercise-%d",e.ID) } class="movement"><div class="movement-head"><div><span class="eyebrow">{ formatName(e.Format) }</span><h2>{ e.Name }</h2><small>{ e.Mode }
 				if e.Format == "emom" {
 					if addable {
@@ -276,9 +298,11 @@ templ SessionExercises(exercises []domain.SessionExercise,editable bool,addable 
 				}
 			</small></div>
 				if addable {
-					<button class="button ghost" type="submit" formaction={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } hx-post={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } hx-target="closest .movement-list" hx-swap="outerHTML show:none" name="session_exercise_id" value={ fmt.Sprintf("%d",e.ID) }>+ Set</button>
+					<button class="button ghost" type="submit" formaction={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } hx-post={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } hx-target="closest .movement" hx-swap="outerHTML show:none settle:0" name="session_exercise_id" value={ fmt.Sprintf("%d",e.ID) }>+ Set</button>
 				}
-			</div><div class="set-table"><div class={ sessionHeaderClass(e.Mode,editable && len(e.Sets)>1) }>
+			</div>
+			@SessionMinuteEditor(e,editable,addable,state) {
+			<div class="set-table"><div class={ sessionHeaderClass(e.Mode,editable && len(e.Sets)>1) }>
 				if e.Format == "emom" {
 					<span>Minute</span>
 				} else {
@@ -296,17 +320,17 @@ templ SessionExercises(exercises []domain.SessionExercise,editable bool,addable 
 				for _, set := range e.Sets {
 					<div class={ sessionRowClass(e.Mode,set.Skipped,editable && len(e.Sets)>1) }><strong>{ setMarker(e.Format,set) }</strong>
 						if editable {
-							<label class="actual-input"><input aria-label="Actual reps" name={ fmt.Sprintf("reps_%d",set.ID) } type="number" inputmode="numeric" min="0" value={ actualRepsValue(set.Reps) } placeholder="Reps"/>
+							<label class="actual-input"><input id={ fmt.Sprintf("reps_%d",set.ID) } aria-label="Actual reps" name={ fmt.Sprintf("reps_%d",set.ID) } type="number" inputmode="numeric" min="0" value={ actualRepsValue(set.Reps) } placeholder="Reps"/>
 								if set.TargetReps != nil {
 									<small>Target { fmt.Sprintf("%d",*set.TargetReps) }</small>
 								}
 							</label>
 							if e.Mode == "weighted" {
-								<label class="weight-input"><input aria-label="Weight in kilograms" name={ fmt.Sprintf("weight_%d",set.ID) } type="number" min="0" step="0.25" value={ number(set.WeightKG) }/><span>kg</span></label>
+								<label class="weight-input"><input id={ fmt.Sprintf("weight_%d",set.ID) } aria-label="Weight in kilograms" name={ fmt.Sprintf("weight_%d",set.ID) } type="number" min="0" step="0.25" value={ number(set.WeightKG) }/><span>kg</span></label>
 							}
 							<input aria-label="Skip set" name={ fmt.Sprintf("skipped_%d",set.ID) } type="checkbox" checked?={ set.Skipped }/>
 							if len(e.Sets)>1 {
-								<button class="icon-button danger set-delete" type="submit" aria-label={ fmt.Sprintf("Delete set %d",set.Position) } title="Delete set" formaction={ fmt.Sprintf("/sessions/%d/sets/%d/delete",e.SessionID,set.ID) } hx-post={ fmt.Sprintf("/sessions/%d/sets/%d/delete",e.SessionID,set.ID) } hx-target="closest .movement-list" hx-swap="outerHTML show:none">×</button>
+								<button class="icon-button danger set-delete" type="submit" aria-label={ fmt.Sprintf("Delete set %d",set.Position) } title="Delete set" formaction={ fmt.Sprintf("/sessions/%d/sets/%d/delete",e.SessionID,set.ID) } hx-post={ fmt.Sprintf("/sessions/%d/sets/%d/delete",e.SessionID,set.ID) } hx-target="closest .movement" hx-swap="outerHTML show:none settle:0">×</button>
 							}
 						} else {
 							<span>{ fmt.Sprintf("%d",set.Reps) }</span>
@@ -321,14 +345,91 @@ templ SessionExercises(exercises []domain.SessionExercise,editable bool,addable 
 						}
 					</div>
 				}
-			</div></article>
-		}
-	</div>
+			</div>
+			}
+			</article>
 }
 
-templ SessionExerciseUpdate(exercises []domain.SessionExercise,editable bool,addable bool,completedSets int) {
-	@SessionExercises(exercises,editable,addable)
+templ SessionMinuteEditor(e domain.SessionExercise,editable bool,addable bool,state emomEntryState) {
+	if editable && e.Format == "emom" {
+		<div data-emom-editor>
+			<div id={ fmt.Sprintf("emom-quick-%d",e.ID) } class="emom-quick"
+				if state.PreserveQuick {
+					hx-preserve="true"
+				}
+			>
+				<div class="emom-quick-fields">
+					<label>Reps per minute<input id={ fmt.Sprintf("emom_reps_%d",e.ID) } name={ fmt.Sprintf("emom_reps_%d",e.ID) } form={ fmt.Sprintf("emom-form-%d",e.ID) } type="number" inputmode="numeric" min="1" step="1" required placeholder="Reps" value={ state.Reps }/></label>
+					if e.Mode == "weighted" {
+						<label>Weight (kg) <span class="optional">Optional</span><input id={ fmt.Sprintf("emom_weight_%d",e.ID) } name={ fmt.Sprintf("emom_weight_%d",e.ID) } form={ fmt.Sprintf("emom-form-%d",e.ID) } type="number" inputmode="decimal" min="0" step="0.25" placeholder="Keep existing weights" value={ state.Weight }/></label>
+					}
+					<button type="submit" form={ fmt.Sprintf("emom-form-%d",e.ID) } name="emom_action" value="apply" class="button secondary">Apply to all minutes</button>
+				</div>
+				<p class="muted">Applies to this exercise only. Skipped minutes stay unchanged.</p>
+				if state.Confirm {
+				<div class="emom-confirm">
+					<p>Existing reps or weights differ. Replace values in all non-skipped minutes, including individual exceptions?</p>
+					<button type="submit" form={ fmt.Sprintf("emom-form-%d",e.ID) } name="emom_action" value="confirm" class="button secondary">Replace values</button>
+					<button type="submit" form={ fmt.Sprintf("emom-form-%d",e.ID) } name="emom_action" value="cancel" formnovalidate class="button ghost">Cancel</button>
+				</div>
+				}
+				<p class="emom-feedback" role="status" aria-live="polite">{ state.Message }</p>
+			</div>
+			<div class="emom-details">
+				<input type="hidden" name={ fmt.Sprintf("emom_present_%d",e.ID) } value="1"/>
+				<input class="emom-toggle" type="checkbox" id={ fmt.Sprintf("emom-open-%d",e.ID) } name={ fmt.Sprintf("emom_open_%d",e.ID) } checked?={ state.Open } aria-controls={ fmt.Sprintf("emom-rows-%d",e.ID) }/>
+				<label class="emom-summary" for={ fmt.Sprintf("emom-open-%d",e.ID) }>
+					Edit individual minutes
+					@EMOMSummary(e,false)
+				</label>
+				<div id={ fmt.Sprintf("emom-rows-%d",e.ID) } class="emom-minute-rows">
+					if !addable {
+						<div hx-post={ fmt.Sprintf("/sessions/%d/exercises/%d/emom",e.SessionID,e.ID) } hx-vals='{"emom_action":"summary"}' hx-trigger="change delay:500ms" hx-target={ fmt.Sprintf("#emom-summary-%d",e.ID) } hx-swap="outerHTML" hx-sync="#session-form:queue all">
+							{ children... }
+						</div>
+					} else {
+						{ children... }
+					}
+				</div>
+			</div>
+		</div>
+	} else {
+		{ children... }
+	}
+}
+
+templ EMOMForms(exercises []domain.SessionExercise) {
+	for _, e := range exercises {
+		if e.Format == "emom" {
+			<form id={ fmt.Sprintf("emom-form-%d",e.ID) } method="post" action={ fmt.Sprintf("/sessions/%d/exercises/%d/emom",e.SessionID,e.ID) } hx-post={ fmt.Sprintf("/sessions/%d/exercises/%d/emom",e.SessionID,e.ID) } hx-include="#session-form" hx-target={ fmt.Sprintf("#exercise-%d",e.ID) } hx-swap="outerHTML show:none settle:0" hx-sync="#session-form:queue all" hx-disabled-elt="#session-fields" hidden></form>
+		}
+	}
+}
+
+templ EMOMSummary(e domain.SessionExercise,outOfBand bool) {
+	if outOfBand {
+		<span id={ fmt.Sprintf("emom-summary-%d",e.ID) } hx-swap-oob="true">{ emomSummary(e) }</span>
+	} else {
+		<span id={ fmt.Sprintf("emom-summary-%d",e.ID) }>{ emomSummary(e) }</span>
+	}
+}
+
+templ SessionExerciseUpdate(e domain.SessionExercise,state emomEntryState,draft bool,completedSets int,saved bool) {
+	@SessionExercise(e,true,draft,state)
 	@SessionSetCount(completedSets,true)
+	if saved {
+		<span id="save-status" class="save-status saved" hx-swap-oob="true">Saved just now</span>
+	}
+}
+
+templ SessionSaved(exercises []domain.SessionExercise,completedSets int) {
+	@SaveStatus()
+	@SessionSetCount(completedSets,true)
+	for _, e := range exercises {
+		if e.Format == "emom" {
+			@EMOMSummary(e,true)
+		}
+	}
 }
 
 templ SessionSetCount(count int,outOfBand bool) {

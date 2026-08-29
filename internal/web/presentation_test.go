@@ -126,7 +126,7 @@ func TestSessionSetPresentation(t *testing.T) {
 	if strings.Contains(output.String(), "/sets/11/delete") {
 		t.Fatalf("single remaining set should not be deletable: %s", output.String())
 	}
-	for _, want := range []string{`id="exercise-7"`, `hx-target="closest .movement-list"`} {
+	for _, want := range []string{`id="exercise-7"`, `hx-target="closest .movement"`} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("session exercise missing %q: %s", want, output.String())
 		}
@@ -161,5 +161,46 @@ func TestCompletedEMOMMinutesUseActualWork(t *testing.T) {
 	}
 	if !strings.Contains(draft.String(), "20 planned minutes") {
 		t.Fatalf("draft EMOM summary should retain planned duration: %s", draft.String())
+	}
+}
+
+func TestEMOMQuickEntryKeepsPerMinuteFormData(t *testing.T) {
+	for _, mode := range []string{"bodyweight", "weighted"} {
+		t.Run(mode, func(t *testing.T) {
+			exercise := domain.SessionExercise{ID: 7, SessionID: 42, Name: "Pull-up", Mode: mode, Format: "emom", Sets: []domain.SessionSet{
+				{ID: 11, Position: 1, Minute: 2, Reps: 8},
+				{ID: 12, Position: 2, Minute: 5, Reps: 6, Skipped: true},
+			}}
+			for _, draft := range []bool{true, false} {
+				var output bytes.Buffer
+				if err := SessionExercises([]domain.SessionExercise{exercise}, true, draft).Render(context.Background(), &output); err != nil {
+					t.Fatal(err)
+				}
+				html := output.String()
+				for _, want := range []string{"data-emom-editor", `name="emom_open_7" checked`, "Apply to all minutes", `form="emom-form-7"`, `name="reps_11"`, `name="reps_12"`, `name="skipped_12"`, ">2</strong>", ">5</strong>", "1 skipped"} {
+					if !strings.Contains(html, want) {
+						t.Errorf("draft=%v missing %q", draft, want)
+					}
+				}
+				if strings.Contains(html, `name="emom_weight_7"`) != (mode == "weighted") {
+					t.Errorf("weight shortcut does not match mode %s", mode)
+				}
+			}
+			var readonly bytes.Buffer
+			if err := SessionExercises([]domain.SessionExercise{exercise}, false, false).Render(context.Background(), &readonly); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(readonly.String(), "data-emom-editor") {
+				t.Fatal("read-only history contains quick entry")
+			}
+			exercise.Format = "sets_reps"
+			var sets bytes.Buffer
+			if err := SessionExercises([]domain.SessionExercise{exercise}, true, true).Render(context.Background(), &sets); err != nil {
+				t.Fatal(err)
+			}
+			if strings.Contains(sets.String(), "data-emom-editor") {
+				t.Fatal("sets × reps contains EMOM quick entry")
+			}
+		})
 	}
 }
