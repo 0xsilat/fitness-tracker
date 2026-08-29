@@ -13,9 +13,9 @@ templ Layout(title string) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title } · Tempo</title>
-			<link rel="stylesheet" href="/static/app.css?v=20260829-set-controls"/>
+			<link rel="stylesheet" href="/static/app.css?v=20260829-emom-entry"/>
 			<script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotkmshcpmSSjZ2fLJm8aTTpYo804Arnaaj5i9IF40ZBrAqBBZJNGbc/HP" crossorigin="anonymous"></script>
-			<script src="/static/app.js" defer></script>
+			<script src="/static/app.js?v=20260829-emom-entry" defer></script>
 		</head>
 		<body>
 			<header class="site-header">
@@ -278,7 +278,9 @@ templ SessionExercises(exercises []domain.SessionExercise,editable bool,addable 
 				if addable {
 					<button class="button ghost" type="submit" formaction={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } hx-post={ fmt.Sprintf("/sessions/%d/sets",e.SessionID) } hx-target="closest .movement-list" hx-swap="outerHTML show:none" name="session_exercise_id" value={ fmt.Sprintf("%d",e.ID) }>+ Set</button>
 				}
-			</div><div class="set-table"><div class={ sessionHeaderClass(e.Mode,editable && len(e.Sets)>1) }>
+			</div>
+			@SessionMinuteEditor(e,editable) {
+			<div class="set-table"><div class={ sessionHeaderClass(e.Mode,editable && len(e.Sets)>1) }>
 				if e.Format == "emom" {
 					<span>Minute</span>
 				} else {
@@ -321,9 +323,40 @@ templ SessionExercises(exercises []domain.SessionExercise,editable bool,addable 
 						}
 					</div>
 				}
-			</div></article>
+			</div>
+			}
+			</article>
 		}
 	</div>
+}
+
+templ SessionMinuteEditor(e domain.SessionExercise,editable bool) {
+	if editable && e.Format == "emom" {
+		<div data-emom-editor>
+			<div class="emom-quick" data-emom-quick hidden>
+				<div class="emom-quick-fields">
+					<label>Reps per minute<input data-emom-reps form={ fmt.Sprintf("emom-quick-%d",e.ID) } type="number" inputmode="numeric" min="1" step="1" required placeholder="Reps"/></label>
+					if e.Mode == "weighted" {
+						<label>Weight (kg) <span class="optional">Optional</span><input data-emom-weight form={ fmt.Sprintf("emom-quick-%d",e.ID) } type="number" inputmode="decimal" min="0" step="0.25" placeholder="Keep existing weights"/></label>
+					}
+					<button type="button" class="button secondary" data-emom-apply>Apply to all minutes</button>
+				</div>
+				<p class="muted">Applies to this exercise only. Skipped minutes stay unchanged.</p>
+				<div class="emom-confirm" data-emom-confirm hidden>
+					<p>Existing reps or weights differ. Replace values in all non-skipped minutes, including individual exceptions?</p>
+					<button type="button" class="button secondary" data-emom-replace>Replace values</button>
+					<button type="button" class="button ghost" data-emom-cancel>Cancel</button>
+				</div>
+				<p class="emom-feedback" data-emom-feedback role="status" aria-live="polite"></p>
+			</div>
+			<details data-emom-minutes open>
+				<summary class="emom-summary">Edit individual minutes <span data-emom-summary></span></summary>
+				{ children... }
+			</details>
+		</div>
+	} else {
+		{ children... }
+	}
 }
 
 templ SessionExerciseUpdate(exercises []domain.SessionExercise,editable bool,addable bool,completedSets int) {
