@@ -126,7 +126,7 @@ func TestSessionSetPresentation(t *testing.T) {
 	if strings.Contains(output.String(), "/sets/11/delete") {
 		t.Fatalf("single remaining set should not be deletable: %s", output.String())
 	}
-	for _, want := range []string{`id="exercise-7"`, `hx-target="closest .movement-list"`} {
+	for _, want := range []string{`id="exercise-7"`, `hx-target="closest .movement"`} {
 		if !strings.Contains(output.String(), want) {
 			t.Errorf("session exercise missing %q: %s", want, output.String())
 		}
@@ -177,12 +177,12 @@ func TestEMOMQuickEntryKeepsPerMinuteFormData(t *testing.T) {
 					t.Fatal(err)
 				}
 				html := output.String()
-				for _, want := range []string{"data-emom-editor", "data-emom-quick hidden", "data-emom-minutes open", "Apply to all minutes", `form="emom-quick-7"`, `name="reps_11"`, `name="reps_12"`, `name="skipped_12"`, ">2</strong>", ">5</strong>"} {
+				for _, want := range []string{"data-emom-editor", `name="emom_open_7" checked`, "Apply to all minutes", `form="emom-form-7"`, `name="reps_11"`, `name="reps_12"`, `name="skipped_12"`, ">2</strong>", ">5</strong>", "1 skipped"} {
 					if !strings.Contains(html, want) {
 						t.Errorf("draft=%v missing %q", draft, want)
 					}
 				}
-				if strings.Contains(html, "data-emom-weight") != (mode == "weighted") {
+				if strings.Contains(html, `name="emom_weight_7"`) != (mode == "weighted") {
 					t.Errorf("weight shortcut does not match mode %s", mode)
 				}
 			}
