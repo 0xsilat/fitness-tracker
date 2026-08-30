@@ -51,6 +51,12 @@ func New(db *store.Store) http.Handler {
 	mux.HandleFunc("POST /sessions/{id}/discard", s.discardSession)
 	mux.HandleFunc("POST /sessions/{id}/delete", s.deleteSession)
 	mux.HandleFunc("GET /analytics", s.analytics)
+	mux.HandleFunc("GET /cardio/new", s.newCardio)
+	mux.HandleFunc("POST /cardio", s.saveCardio)
+	mux.HandleFunc("GET /cardio/{id}", s.cardio)
+	mux.HandleFunc("POST /cardio/{id}/update", s.saveCardio)
+	mux.HandleFunc("POST /cardio/{id}/delete", s.deleteCardio)
+	mux.HandleFunc("GET /analytics/cardio", s.cardioAnalytics)
 	mux.HandleFunc("GET /analytics/routines/{id}", s.routineAnalytics)
 	mux.HandleFunc("GET /analytics/exercises/{id}", s.exerciseAnalytics)
 	mux.HandleFunc("GET /about", func(w http.ResponseWriter, r *http.Request) { s.render(w, r, AboutPage()) })
@@ -350,7 +356,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request) {
 	redirect(w, r, fmt.Sprintf("/sessions?new=1&workout_id=%d", id))
 }
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
-	items, err := s.db.Sessions(r.Context(), 100)
+	items, err := s.db.TrainingLog(r.Context(), 100)
 	if err != nil {
 		s.fail(w, r, err)
 		return
@@ -692,6 +698,17 @@ func (s *Server) exerciseAnalytics(w http.ResponseWriter, r *http.Request) {
 	id, err := idParam(r, "id")
 	if err != nil {
 		s.fail(w, r, err)
+		return
+	}
+	e, err := s.db.Exercise(r.Context(), id)
+	if err != nil {
+		s.fail(w, r, err)
+		return
+	}
+	if e.Mode == "cardio" {
+		query := r.URL.Query()
+		query.Set("exercise_id", strconv.FormatInt(id, 10))
+		redirect(w, r, "/analytics/cardio?"+query.Encode())
 		return
 	}
 	a, err := s.db.ExerciseAnalytics(r.Context(), id, r.URL.Query().Get("from"), r.URL.Query().Get("to"))

@@ -333,14 +333,18 @@ func (s *Store) Dashboard(ctx context.Context) (domain.Dashboard, error) {
 		count(*) FILTER (WHERE performed_on BETWEEN $2::date AND $1::date),
 		count(*) FILTER (WHERE performed_on BETWEEN $3::date AND $1::date),
 		count(*) FILTER (WHERE performed_on BETWEEN $4::date AND $1::date)
-		FROM sessions WHERE status='completed'`, window.Today, window.Start7, window.Start30, window.Start90).Scan(&d.SessionCount7, &d.SessionCount30, &d.SessionCount90)
+		FROM (SELECT performed_on FROM sessions WHERE status='completed' UNION ALL SELECT performed_on FROM cardio_sessions) training`, window.Today, window.Start7, window.Start30, window.Start90).Scan(&d.SessionCount7, &d.SessionCount30, &d.SessionCount90)
 	if err != nil {
 		return d, err
 	}
 	d.SessionsThisWeek = d.SessionCount7
-	rows, err := s.pool.Query(ctx, `SELECT days.day, count(s.id)
+	err = s.pool.QueryRow(ctx, `SELECT coalesce(sum(duration_minutes),0) FROM cardio_sessions WHERE performed_on BETWEEN $1::date AND $2::date`, domain.MondayOfWeek(window.Today), window.Today).Scan(&d.CardioMinutesThisWeek)
+	if err != nil {
+		return d, err
+	}
+	rows, err := s.pool.Query(ctx, `SELECT days.day, count(s.performed_on)
 		FROM generate_series($2::date, $1::date, interval '1 day') AS days(day)
-		LEFT JOIN sessions s ON s.status='completed' AND s.performed_on=days.day
+		LEFT JOIN (SELECT performed_on FROM sessions WHERE status='completed' UNION ALL SELECT performed_on FROM cardio_sessions) s ON s.performed_on=days.day
 		GROUP BY days.day ORDER BY days.day`, window.Today, window.Start365)
 	if err != nil {
 		return d, err

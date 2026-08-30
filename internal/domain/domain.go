@@ -104,16 +104,17 @@ type SessionSet struct {
 }
 
 type Dashboard struct {
-	ActiveRoutine    *Routine
-	Workouts         []Workout
-	NextWorkout      *Workout
-	Recent           []Session
-	Drafts           []Session
-	SessionsThisWeek int
-	SessionCount7    int
-	SessionCount30   int
-	SessionCount90   int
-	Activity         []ActivityDay
+	CardioMinutesThisWeek float64
+	ActiveRoutine         *Routine
+	Workouts              []Workout
+	NextWorkout           *Workout
+	Recent                []Session
+	Drafts                []Session
+	SessionsThisWeek      int
+	SessionCount7         int
+	SessionCount30        int
+	SessionCount90        int
+	Activity              []ActivityDay
 }
 
 type ActivityDay struct {
