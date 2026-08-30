@@ -38,3 +38,11 @@ The default development database URL is `postgres://fitness:fitness@localhost:54
 - Server-rendered EMOM logging through Go and HTMX: apply shared reps and optional weight to non-skipped minutes, then expand to edit individual exceptions
 - Routine consistency and routine-independent per-exercise progress analytics
 - Exercise-specific weighted volume (kg·reps) and bodyweight rep tracking
+- Independent cardio entries with activity, performed date, decimal minutes and optional notes; edit or delete them from the shared training log
+- Ten default cardio activities plus custom, archivable cardio exercises in the shared library
+- Cardio minutes per Monday–Sunday week, date and activity filters, and totals by activity under Analytics → Cardio
+- Home consistency counts both completed workouts and cardio, with a separate current-week cardio-minutes summary
+
+Cardio entries do not require a routine and do not change workout progression or strength analytics. Archiving an activity preserves its history. Schema upgrades and default cardio activities are applied automatically on startup.
+
+Database integration tests are optional during ordinary development. Set `TEST_DATABASE_URL` to a disposable PostgreSQL database and run `go test ./...` to include them. Each test uses its own temporary schema and removes that schema afterward; the database role needs permission to create schemas. Do not point this setting at a production database.

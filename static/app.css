@@ -50,7 +50,7 @@ section { margin-bottom: 28px; }
 .section-title a { color: var(--green); font-weight: 700; }
 .panel, .movement { padding: 16px; border: 1px solid var(--line); border-radius: 11px; background: var(--card); }
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 0 0 28px; }
-.home-metrics { grid-template-columns: repeat(3, 1fr); }
+.home-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .metric { display: grid; min-height: 94px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); }
 .metric.accent { border-color: transparent; background: var(--lime); }
 .metric span, .metric small { color: var(--muted); font-size: 12px; }
@@ -192,7 +192,7 @@ hr { margin: 18px 0; border: 0; border-top: 1px solid var(--line); }
 footer { display: flex; justify-content: space-between; width: min(1060px, calc(100% - 32px)); margin: 0 auto; padding: 20px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 @media (max-width: 760px) {
   .metric-grid { grid-template-columns: repeat(2, 1fr); }
-  .home-metrics { grid-template-columns: repeat(3, 1fr); }
+  .home-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .page-heading { align-items: flex-start; flex-direction: column; }
   .form-grid { grid-template-columns: 1fr; }
   .date-filter { flex-wrap: wrap; }
@@ -231,3 +231,10 @@ footer { display: flex; justify-content: space-between; width: min(1060px, calc(
   .page-heading .actions, .page-actions { flex-wrap: wrap; }
   th, td { padding: 9px; }
 }
+
+.analytics-tabs { margin-bottom: 22px; }
+.cardio-filter { margin-bottom: 22px; flex-wrap: wrap; }
+.cardio-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cardio-notes { white-space: pre-wrap; overflow-wrap: anywhere; }
+.form-error { color: var(--danger); }
+@media (max-width: 560px) { .cardio-filter label { width: 100%; } }

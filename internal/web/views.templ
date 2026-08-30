@@ -13,7 +13,7 @@ templ Layout(title string) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title } · Tempo</title>
-			<link rel="stylesheet" href="/static/app.css?v=20260830-server-emom"/>
+			<link rel="stylesheet" href="/static/app.css?v=20260830-cardio"/>
 			<script src="https://unpkg.com/htmx.org@2.0.4" integrity="sha384-HGfztofotkmshcpmSSjZ2fLJm8aTTpYo804Arnaaj5i9IF40ZBrAqBBZJNGbc/HP" crossorigin="anonymous"></script>
 			<script src="/static/app.js?v=20260830-server-emom" defer></script>
 		</head>
@@ -38,8 +38,9 @@ templ EmptyState(title,text string) { <div class="empty"><span class="empty-icon
 
 templ DashboardPage(d domain.Dashboard) {
 	@Layout("Home") {
-		@PageHeader("Training overview","Home","Your completed-session consistency over the last year.") { <a class="button primary" href="/sessions?new=1">Log workout</a> }
+		@PageHeader("Training overview","Home","Your completed-session consistency over the last year.") { <div class="actions"><a class="button primary" href="/sessions?new=1">Log workout</a><a class="button secondary" href="/cardio/new">Log cardio</a></div> }
 		<div class="metric-grid home-metrics">
+			<div class="metric"><span>Cardio this week</span><strong>{ number(d.CardioMinutesThisWeek) }</strong><small>minutes · Monday to today</small></div>
 			<div class="metric accent"><span>Last 7 days</span><strong>{ fmt.Sprintf("%d",d.SessionCount7) }</strong><small>completed sessions</small></div>
 			<div class="metric"><span>Last 30 days</span><strong>{ fmt.Sprintf("%d",d.SessionCount30) }</strong><small>completed sessions</small></div>
 			<div class="metric"><span>Last 90 days</span><strong>{ fmt.Sprintf("%d",d.SessionCount90) }</strong><small>completed sessions</small></div>
@@ -82,8 +83,8 @@ templ SessionRow(x domain.Session) { <a class="session-row" href={ templ.SafeURL
 
 templ ExercisesPage(items []domain.Exercise,showArchived bool) {
 	@Layout("Exercises") {
-		@PageHeader("Library","Exercises","Shared exercise records keep progress connected across every routine.") { <a class="button secondary" href="#add-exercise">Add exercise</a> }
-		<details id="add-exercise" class="disclosure" open?={ len(items)==0 }><summary class="disclosure-summary">Add an exercise <span>+</span></summary><div class="disclosure-body"><form class="stack compact-form" method="post" action="/exercises"><label>Name<input name="name" required placeholder="e.g. Bulgarian split squat"/></label><label>Tracking<select name="mode"><option value="weighted">Weighted</option><option value="bodyweight">Bodyweight</option></select></label><button class="button primary">Add exercise</button></form></div></details>
+		@PageHeader("Library","Exercises","Reusable strength exercises and cardio activities keep your progress connected.") { <a class="button secondary" href="#add-exercise">Add exercise</a> }
+		<details id="add-exercise" class="disclosure" open?={ len(items)==0 }><summary class="disclosure-summary">Add an exercise <span>+</span></summary><div class="disclosure-body"><form class="stack compact-form" method="post" action="/exercises"><label>Name<input name="name" required placeholder="e.g. Bulgarian split squat"/></label><label>Tracking<select name="mode"><option value="weighted">Weighted</option><option value="bodyweight">Bodyweight</option><option value="cardio">Cardio (minutes)</option></select></label><button class="button primary">Add exercise</button></form></div></details>
 		<section>
 				<div class="section-title"><h2>Your library</h2>
 					if showArchived {
@@ -98,7 +99,7 @@ templ ExercisesPage(items []domain.Exercise,showArchived bool) {
 							if x.Archived {
 								<span class="pill">Archived</span>
 							}
-						</td><td>{ x.Mode }</td><td><a href={ templ.SafeURL(fmt.Sprintf("/analytics/exercises/%d",x.ID)) }>Analytics</a></td><td>
+						</td><td>{ x.Mode }</td><td><a href={ templ.SafeURL(exerciseAnalyticsURL(x)) }>Analytics</a></td><td>
 							if !x.Archived {
 								<form method="post" action={ fmt.Sprintf("/exercises/%d/archive",x.ID) }><button class="text-button">Archive</button></form>
 							}
@@ -190,16 +191,18 @@ templ WorkoutPage(r domain.Routine,w domain.Workout,exercises []domain.Exercise)
 		</div></section>
 		<details class="disclosure" open?={ len(w.Prescription.Movements)==0 }><summary class="disclosure-summary">Add exercise block <span>+</span></summary><div class="disclosure-body"><form class="stack compact-form" data-format-form method="post" action={ fmt.Sprintf("/workouts/%d/movements",w.ID) }><div class="form-grid"><label>Exercise<select name="exercise_id">
 				for _, x := range exercises {
-					<option value={ fmt.Sprintf("%d",x.ID) }>{ x.Name } · { x.Mode }</option>
+					if x.Mode != "cardio" {
+<option value={ fmt.Sprintf("%d",x.ID) }>{ x.Name } · { x.Mode }</option>
+}
 				}
 			</select></label><label>Format<select name="format" data-format-select aria-controls="sets-fields emom-fields"><option value="sets_reps">Sets × reps</option><option value="emom">EMOM</option></select></label><label>Target reps <span class="optional">Optional</span><input name="target_reps" type="number" inputmode="numeric" min="1" placeholder="Open reps"/></label><label>Planned weight (kg) <span class="optional">Optional</span><input name="weight" type="number" inputmode="decimal" min="0" step="0.25" placeholder="0"/></label></div><div id="sets-fields" data-format-fields="sets_reps"><label>Number of sets<input name="sets" type="number" inputmode="numeric" min="1" value="3"/></label></div><fieldset id="emom-fields" class="emom-fields" data-format-fields="emom"><legend>EMOM structure</legend><label>Duration (minutes)<input name="duration" type="number" inputmode="numeric" min="1" value="10"/></label><label>Starting minute<input name="start_minute" type="number" inputmode="numeric" min="1" value="1"/></label><label>Repeat every (minutes)<input name="interval_minutes" type="number" inputmode="numeric" min="1" value="1"/></label></fieldset>
 				<button class="button primary">Add to workout</button></form></div></details>
 	}
 }
 
-templ SessionsPage(items []domain.Session,groups []domain.WorkoutGroup,showNewForm bool,selectedWorkoutID int64,performedOn time.Time) {
-	@Layout("Log workouts") {
-		@PageHeader("Training log","Log workouts","Add a workout entry, then review your complete training history.") { <a class="button primary" href="/sessions?new=1">Add new workout</a> }
+templ SessionsPage(items []domain.TrainingEntry,groups []domain.WorkoutGroup,showNewForm bool,selectedWorkoutID int64,performedOn time.Time) {
+	@Layout("Training log") {
+		@PageHeader("Training log","Training log","Review your workouts and cardio in one place.") { <div class="actions"><a class="button primary" href="/sessions?new=1">Add new workout</a><a class="button secondary" href="/cardio/new">Log cardio</a></div> }
 		if showNewForm {
 			<section class="panel session-start"><div class="section-title"><h2>Add new workout</h2><a href="/sessions">Cancel</a></div><form class="stack" method="post" action="/sessions"><label>Workout<select name="workout_id" required><option value="">Choose a workout</option>
 				for _, group := range groups {
@@ -213,13 +216,13 @@ templ SessionsPage(items []domain.Session,groups []domain.WorkoutGroup,showNewFo
 		}
 		<section><div class="section-title"><h2>Log history</h2><span>{ fmt.Sprintf("%d",len(items)) } entries</span></div><div class="session-list">
 			if len(items) == 0 {
-				<p class="muted">No workout entries yet.</p>
+				<p class="muted">No training entries yet.</p>
 			}
 			for i, x := range items {
-				if startsSessionMonth(items,i) {
+				if trainingMonthStarts(items,i) {
 					<div class="session-month-divider"><span>{ sessionMonth(x.PerformedOn) }</span></div>
 				}
-				@SessionRow(x)
+				@TrainingRow(x)
 			}
 		</div></section>
 	}
@@ -231,7 +234,7 @@ templ SessionPage(s domain.Session,exercises []domain.SessionExercise,editing bo
 
 templ SessionPageWithState(s domain.Session,exercises []domain.SessionExercise,editing bool,states map[int64]emomEntryState) {
 	@Layout(s.WorkoutName) {
-		<a class="back" href="/sessions">← Log workouts</a>
+		<a class="back" href="/sessions">← Training log</a>
 		@PageHeader(s.RoutineName,s.WorkoutName,formatName(s.Format)+" · Performed "+date(s.PerformedOn)) {
 			<span class={ "status "+s.Status }>{ s.Status }</span>
 			@SessionSetCount(s.CompletedSets,false)
@@ -468,6 +471,7 @@ templ ExerciseSummaryTable(items []domain.ExerciseSummary,from,to string) {
 
 templ AnalyticsPage(a domain.AnalyticsOverview) {
 	@Layout("Analytics") {
+		@AnalyticsTabs(inputDate(a.From),inputDate(a.To),false)
 		@PageHeader("Training analytics","Exercise progress","Compare each exercise across every routine without mixing unrelated training volume.") { @DateFilter(inputDate(a.From),inputDate(a.To)) }
 		<section><div class="section-title"><h2>Exercises</h2><span>{ fmt.Sprintf("%d with completed work",len(a.Exercises)) }</span></div>@ExerciseSummaryTable(a.Exercises,inputDate(a.From),inputDate(a.To))</section>
 	}

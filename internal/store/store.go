@@ -100,7 +100,7 @@ func (s *Store) Exercise(ctx context.Context, id int64) (domain.Exercise, error)
 
 func (s *Store) CreateExercise(ctx context.Context, name, mode string) error {
 	name = strings.TrimSpace(name)
-	if name == "" || (mode != "weighted" && mode != "bodyweight") {
+	if name == "" || (mode != "weighted" && mode != "bodyweight" && mode != "cardio") {
 		return errors.New("name and valid tracking mode are required")
 	}
 	_, err := s.pool.Exec(ctx, `INSERT INTO exercises(name,mode) VALUES($1,$2)`, name, mode)
@@ -279,6 +279,9 @@ func (s *Store) AddMovement(ctx context.Context, workoutID, exerciseID int64, fo
 	exercise, err := s.Exercise(ctx, exerciseID)
 	if err != nil {
 		return err
+	}
+	if exercise.Mode == "cardio" {
+		return errors.New("log cardio independently from workout plans")
 	}
 	sets, err := domain.BuildPlannedSets(format, setCount, targetReps, weight, startMinute, duration, interval)
 	if err != nil {
