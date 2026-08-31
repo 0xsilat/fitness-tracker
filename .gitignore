@@ -1,0 +1,5 @@
+*_templ.go
+.env
+bin/
+tmp/
+dev-compose.yaml

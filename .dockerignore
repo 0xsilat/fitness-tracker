@@ -1,0 +1,6 @@
+.git
+.gitignore
+tmp
+bin
+*_templ.go
+

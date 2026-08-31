@@ -1,0 +1,104 @@
+package web
+
+import (
+ "fmt"
+ "strconv"
+ "github.com/local/fitness-tracker/internal/domain"
+)
+
+templ TrainingRow(x domain.TrainingEntry) {
+ <a class="session-row" href={ templ.SafeURL(x.URL) }><span class="session-row-title"><strong>{ x.Title }</strong><small>
+ if x.Kind == "cardio" {
+  Cardio · { number(x.DurationMinutes) } minutes
+ } else {
+  Workout · { fmt.Sprintf("%d sets done",x.CompletedSets) }
+ }
+ </small></span><time datetime={ inputDate(x.PerformedOn) }>{ date(x.PerformedOn) }</time><span class={ "status "+x.Status }>{ x.Status }</span><span class="row-chevron" aria-hidden="true">›</span></a>
+}
+
+templ CardioFormPage(f cardioForm,items []domain.Exercise) {
+ @Layout("Log cardio") {
+  <a class="back" href="/sessions">← Training log</a>
+  @PageHeader("Cardio","Log cardio","Record your time, independently of any workout plan.") {}
+  <section class="panel">
+   if f.Error != "" {
+ <p class="form-error" role="alert">{ f.Error }</p>
+ }
+   if len(items)==0 {
+ <p class="muted">No cardio activities available. <a href="/exercises#add-exercise">Add a cardio activity</a> in your exercise library.</p>
+ }
+   <form class="stack compact-form" method="post" action={ cardioFormAction(f.ID) }>
+    <label>Activity<select name="exercise_id" required><option value="">Choose a cardio activity</option>
+     for _,e := range items {
+      <option value={ strconv.FormatInt(e.ID,10) } selected?={ f.ExerciseID==strconv.FormatInt(e.ID,10) }>{ e.Name }
+       if e.Archived {
+ (archived)
+ }
+      </option>
+     }
+    </select></label>
+    <div class="form-grid"><label>Date performed<input type="date" name="performed_on" required value={ f.PerformedOn }/></label><label>Duration (minutes)<input type="number" name="minutes" inputmode="decimal" min="0.1" max="99999999.9" step="0.1" required value={ f.Minutes } placeholder="e.g. 20 or 12.5"/></label></div>
+    <label>Notes <span class="optional">Optional</span><textarea name="notes" rows="4" placeholder="How did it feel?">{ f.Notes }</textarea></label>
+    <div class="actions"><button class="button primary" disabled?={ len(items)==0 }>Save cardio</button><a class="button secondary" href={ templ.SafeURL(cardioFormCancel(f.ID)) }>Cancel</a></div>
+   </form>
+  </section>
+ }
+}
+
+templ CardioPage(c domain.CardioSession) {
+ @Layout(c.ExerciseName) {
+  <a class="back" href="/sessions">← Training log</a>
+  @PageHeader("Cardio",c.ExerciseName,"Performed "+date(c.PerformedOn)) { <div class="actions"><span class="status completed">completed</span><a class="button secondary" href={ templ.SafeURL(fmt.Sprintf("/cardio/%d?edit=1",c.ID)) }>Edit entry</a></div> }
+  <section class="panel"><div class="metric"><span>Duration</span><strong>{ number(c.DurationMinutes) }</strong><small>minutes</small></div>
+   if c.Notes!="" {
+ <h2>Notes</h2><p class="cardio-notes">{ c.Notes }</p>
+ }
+  </section>
+  <div class="page-actions"><a class="button secondary" href={ templ.SafeURL(fmt.Sprintf("/analytics/cardio?exercise_id=%d",c.ExerciseID)) }>Activity analytics</a><form method="post" action={ fmt.Sprintf("/cardio/%d/delete",c.ID) } onsubmit="return confirm('Permanently delete this cardio session?')"><button class="text-button danger">Delete session</button></form></div>
+ }
+}
+
+templ AnalyticsTabs(from,to string,cardio bool) {
+ <nav class="analytics-tabs actions" aria-label="Analytics views">
+  <a class={ "button",templ.KV("primary",!cardio),templ.KV("secondary",cardio) } href={ templ.SafeURL("/analytics?from="+from+"&to="+to) }>Strength</a>
+  <a class={ "button",templ.KV("primary",cardio),templ.KV("secondary",!cardio) } href={ templ.SafeURL("/analytics/cardio?from="+from+"&to="+to) }>Cardio</a>
+ </nav>
+}
+
+templ CardioAnalyticsPage(a domain.CardioAnalytics,items []domain.Exercise) {
+ @Layout("Cardio analytics") {
+  @PageHeader("Training analytics","Cardio progress","Time spent moving, across every cardio activity.") { <a class="button primary" href="/cardio/new">Log cardio</a> }
+  @AnalyticsTabs(inputDate(a.From),inputDate(a.To),true)
+  <form class="date-filter cardio-filter" method="get" action="/analytics/cardio">
+   <label>From<input type="date" name="from" value={ inputDate(a.From) } required/></label><label>To<input type="date" name="to" value={ inputDate(a.To) } required/></label>
+   <label>Activity<select name="exercise_id"><option value="0">All cardio activities</option>
+    for _,e := range items {
+     if e.Mode=="cardio" {
+ <option value={ strconv.FormatInt(e.ID,10) } selected?={ a.ExerciseID==e.ID }>{ e.Name
+ }
+      if e.Archived {
+ (archived)
+ }
+     </option>
+}
+    }
+   </select></label><button class="button secondary">Apply</button>
+  </form>
+  <div class="metric-grid cardio-metrics"><div class="metric accent"><span>Total minutes</span><strong>{ number(a.Minutes) }</strong><small>in selected period</small></div><div class="metric"><span>Sessions</span><strong>{ fmt.Sprintf("%d",a.Sessions) }</strong><small>completed cardio entries</small></div></div>
+  if a.Sessions==0 {
+ @EmptyState("No cardio in this period","Log a cardio session or adjust your date and activity filters.") {}
+ }
+  <section class="panel chart-panel"><div class="section-title"><h2>Minutes per week</h2><span>Monday–Sunday</span></div>@Chart(a.Points,"Cardio minutes per week",chartOptions{Unit: "minutes"})<p class="muted">Partial weeks include only dates within the selected period.</p></section>
+  <section><div class="section-title"><h2>By activity</h2><span>{ date(a.From) } – { date(a.To) }</span></div>
+   <div class="table-wrap"><table><thead><tr><th>Activity</th><th>Sessions</th><th>Minutes</th></tr></thead><tbody>
+    for _,x := range a.Exercises {
+     <tr><td><a href={ templ.SafeURL(fmt.Sprintf("/analytics/cardio?exercise_id=%d&from=%s&to=%s",x.Exercise.ID,inputDate(a.From),inputDate(a.To))) }>{ x.Exercise.Name }</a>
+      if x.Exercise.Archived {
+ <span class="pill">Archived</span>
+ }
+     </td><td>{ fmt.Sprintf("%d",x.Sessions) }</td><td>{ number(x.Minutes) }</td></tr>
+    }
+   </tbody></table></div>
+  </section>
+ }
+}
