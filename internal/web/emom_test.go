@@ -3,9 +3,13 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha512"
+	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,6 +17,106 @@ import (
 
 	"github.com/local/fitness-tracker/internal/domain"
 )
+
+func TestHTMXIntegrityMatchesBundledScript(t *testing.T) {
+	script, err := os.ReadFile("../../static/htmx.min.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha512.Sum384(script)
+	var output bytes.Buffer
+	if err := Layout("test").Render(context.Background(), &output); err != nil {
+		t.Fatal(err)
+	}
+	want := `integrity="sha384-` + base64.StdEncoding.EncodeToString(digest[:]) + `"`
+	if !strings.Contains(output.String(), want) || !strings.Contains(output.String(), `src="/static/htmx.min.js?v=2.0.4"`) {
+		t.Fatal("the browser would reject HTMX or need the CDN")
+	}
+}
+
+func TestEMOMExactCountsAndDefaults(t *testing.T) {
+	e := sampleEMOM()
+	e.IntervalMinutes = 3
+	e.PlannedMinutes = []int{2, 5, 8}
+	state := emomEntryState{Reps: "10", Count: "1"}
+	before := append([]domain.SessionSet(nil), e.Sets...)
+	if err := applyEMOM(&e, &state, false); err != nil || !state.Confirm || !reflect.DeepEqual(before, e.Sets) {
+		t.Fatalf("confirmation: %v %#v", err, e)
+	}
+	if err := applyEMOM(&e, &state, true); err != nil {
+		t.Fatal(err)
+	}
+	if completedExerciseSets(e) != 1 || e.Sets[2].Reps != 0 || e.Sets[1] != before[1] || e.Sets[2].WeightKG != 15 {
+		t.Fatalf("short count: %#v", e.Sets)
+	}
+	state = emomEntryState{Reps: "10", Count: "4"}
+	if err := applyEMOM(&e, &state, true); err != nil {
+		t.Fatal(err)
+	}
+	if completedExerciseSets(e) != 4 || len(e.Sets) != 5 || e.Sets[3].Minute != 11 || e.Sets[4].Minute != 14 || e.Sets[4].WeightKG != 15 {
+		t.Fatalf("extended: %#v", e.Sets)
+	}
+	state = emomEntryState{Reps: "10"}
+	if err := applyEMOM(&e, &state, true); err != nil {
+		t.Fatal(err)
+	}
+	if completedExerciseSets(e) != 2 {
+		t.Fatalf("blank must use snapshot, not added rows: %#v", e.Sets)
+	}
+	for _, count := range []string{"0", "-1", "1.5", "oops", "10001"} {
+		before = append([]domain.SessionSet(nil), e.Sets...)
+		if err := applyEMOM(&e, &emomEntryState{Reps: "10", Count: count}, true); err == nil || !reflect.DeepEqual(before, e.Sets) {
+			t.Fatalf("accepted invalid count %q", count)
+		}
+	}
+}
+
+func TestEMOMAverageExcludesSkippedAndUnlogged(t *testing.T) {
+	e := sampleEMOM()
+	e.Sets[0].Reps = 5
+	e.Sets[2].Reps = 8
+	e.Sets = append(e.Sets, domain.SessionSet{Reps: 0}, domain.SessionSet{Reps: 100, Deleted: true})
+	if got := emomStats(e); got != "2 minutes done · 6.5 avg reps/min" {
+		t.Fatal(got)
+	}
+	for i := range e.Sets {
+		e.Sets[i].Reps = 0
+	}
+	if got := emomStats(e); got != "0 minutes done · — avg reps/min" {
+		t.Fatal(got)
+	}
+}
+
+func TestPendingEMOMRowsRoundTrip(t *testing.T) {
+	e := sampleEMOM()
+	e.IntervalMinutes = 3
+	for i := range e.Sets {
+		e.Sets[i].Position = i + 1
+	}
+	appendEMOMMinute(&e)
+	e.Sets[3].Reps = 12
+	values := url.Values{"performed_on": {"2026-08-31"}, "emom_pending_7": {"1"}}
+	for _, set := range e.Sets {
+		key := sessionSetKey(set)
+		values.Set("reps_"+key, fmt.Sprint(set.Reps))
+		values.Set("weight_"+key, fmt.Sprint(set.WeightKG))
+		if set.Skipped {
+			values.Set("skipped_"+key, "on")
+		}
+	}
+	r := httptest.NewRequest("POST", "/", strings.NewReader(values.Encode()))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	_ = r.ParseForm()
+	exercises := []domain.SessionExercise{e}
+	exercises[0].Sets = exercises[0].Sets[:3]
+	updates, err := overlaySessionForm(r, &domain.Session{}, exercises)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 4 || updates[3].ID != 0 || updates[3].SessionExerciseID != 7 || updates[3].Reps != 12 || updates[3].Minute != 11 {
+		t.Fatalf("pending row: %#v", updates)
+	}
+}
 
 func sampleEMOM() domain.SessionExercise {
 	return domain.SessionExercise{ID: 7, SessionID: 42, Format: "emom", Mode: "weighted", Sets: []domain.SessionSet{
@@ -134,10 +238,13 @@ func TestEMOMFormsUseHTMXWithoutCustomScripting(t *testing.T) {
 		t.Fatal(err)
 	}
 	html := output.String()
-	for _, want := range []string{`id="emom-form-7"`, `hx-include="#session-form"`, `hx-sync="#session-form:queue all"`, `hx-disabled-elt="#session-fields"`, `/sessions/42/exercises/7/emom`, `form="emom-form-7"`, `name="emom_present_7"`} {
+	for _, want := range []string{`id="session-form"`, `hx-include="#session-form"`, `hx-sync="#session-form:queue all"`, `hx-disabled-elt="#session-fields"`, `formaction="/sessions/42/exercises/7/emom"`, `name="emom_count_7"`, `name="emom_present_7"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("missing %s", want)
 		}
+	}
+	if strings.Contains(html, `form="emom-form-`) || strings.Contains(html, `<noscript>`) {
+		t.Fatal("bulk entry must also submit the full session without HTMX")
 	}
 	if strings.Contains(html, "hx-on:") || strings.Contains(html, "initializeEMOM") {
 		t.Fatal("EMOM must not require custom event scripts")

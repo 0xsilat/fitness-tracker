@@ -177,7 +177,7 @@ func TestEMOMQuickEntryKeepsPerMinuteFormData(t *testing.T) {
 					t.Fatal(err)
 				}
 				html := output.String()
-				for _, want := range []string{"data-emom-editor", `name="emom_open_7" checked`, "Apply to all minutes", `form="emom-form-7"`, `name="reps_11"`, `name="reps_12"`, `name="skipped_12"`, ">2</strong>", ">5</strong>", "1 skipped"} {
+				for _, want := range []string{"data-emom-editor", `name="emom_open_7" checked`, "Apply to minutes", `formaction="/sessions/42/exercises/7/emom"`, `name="reps_11"`, `name="reps_12"`, `name="skipped_12"`, ">2</strong>", ">5</strong>", "1 skipped"} {
 					if !strings.Contains(html, want) {
 						t.Errorf("draft=%v missing %q", draft, want)
 					}

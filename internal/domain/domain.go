@@ -90,6 +90,8 @@ type SessionExercise struct {
 	IntervalMinutes int
 	Position        int
 	Sets            []SessionSet
+	// PlannedMinutes comes from the session snapshot, not the current workout.
+	PlannedMinutes []int
 }
 
 type SessionSet struct {
@@ -101,6 +103,7 @@ type SessionSet struct {
 	TargetReps        *int
 	WeightKG          float64
 	Skipped           bool
+	Deleted           bool // Pending form edit; never persisted as a column.
 }
 
 type Dashboard struct {
