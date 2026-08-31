@@ -1,0 +1,64 @@
+package web
+
+import (
+	"strconv"
+	"github.com/local/fitness-tracker/internal/domain"
+)
+
+templ Chart(points []domain.ChartPoint, label string, options chartOptions) {
+	{{ chart := buildChart(points, options) }}
+	<div class="chart" data-chart role="group" aria-label={ label }>
+		if len(chart.Points) == 0 {
+			<p class="muted">No completed activity in this period. Log a session or adjust your date filters to see a trend.</p>
+		} else {
+			<p class="chart-unit">{ options.Unit }</p>
+			<div class="chart-canvas">
+				<div class="chart-y-axis" aria-hidden="true">
+					for _, tick := range chart.Ticks {
+						<span style={ chartTop(tick.Position) }>{ tick.Label }</span>
+					}
+				</div>
+				<div class="chart-plot" data-chart-plot>
+					for _, tick := range chart.Ticks {
+						<div class="chart-gridline" style={ chartTop(tick.Position) } aria-hidden="true"></div>
+					}
+					<svg viewBox="0 0 1000 200" preserveAspectRatio="none" aria-hidden="true">
+						if len(chart.Points) > 1 {
+							<polyline points={ chart.Line }></polyline>
+						}
+					</svg>
+					for i, point := range chart.Points {
+						<button type="button" class="chart-point" data-chart-point={ strconv.Itoa(i) } data-chart-label={ point.Label } data-chart-value={ point.Value + " " + options.Unit } data-chart-x={ strconv.FormatFloat(point.X, 'f', 4, 64) } style={ chartPosition(point.X, point.Y) } tabindex={ chartTabIndex(i, len(chart.Points)) } aria-label={ point.Label + ": " + point.Value + " " + options.Unit } aria-pressed={ strconv.FormatBool(i == len(chart.Points)-1) }>
+							<span class="chart-dot" aria-hidden="true"></span>
+						</button>
+						if point.ShowLabel {
+							<span class={ "chart-point-label", chartAnchor(point.X), templ.KV("chart-mobile-label", point.MobileLabel) } style={ chartPosition(point.X, point.Y) } aria-hidden="true">{ point.Value }</span>
+						}
+					}
+					<div class="chart-dates" aria-hidden="true">
+						for _, tick := range chart.Dates {
+							<span class={ chartAnchor(tick.Position), templ.KV("chart-mobile-label", tick.Mobile) } style={ chartLeft(tick.Position) }>{ tick.Label }</span>
+						}
+					</div>
+				</div>
+			</div>
+			<div class="chart-readout" data-chart-readout aria-live="polite" aria-atomic="true">
+				<span data-chart-readout-label>{ chart.Points[len(chart.Points)-1].Label }</span>
+				<strong data-chart-readout-value>{ chart.Points[len(chart.Points)-1].Value } { options.Unit }</strong>
+			</div>
+			<p class="chart-hint" data-chart-hint hidden>Hover or tap to inspect. Use ← / →, Home or End when a point is focused.</p>
+			<details class="chart-data">
+				<summary>View data ({ chartPointCount(len(chart.Points)) })</summary>
+				<div class="table-wrap"><table>
+					<caption>{ label }</caption>
+					<thead><tr><th scope="col">Date</th><th scope="col">{ options.Unit }</th></tr></thead>
+					<tbody>
+						for _, point := range chart.Points {
+							<tr><th scope="row">{ point.Label }</th><td>{ point.Value }</td></tr>
+						}
+					</tbody>
+				</table></div>
+			</details>
+		}
+	</div>
+}

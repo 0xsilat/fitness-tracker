@@ -84,6 +84,10 @@ func TestCardioIntegration(t *testing.T) {
 		t.Fatalf("analytics: %#v", a)
 	}
 	for i, want := range []float64{20, 30, 0, 10} {
+		week := time.Date(2025, 12, 29, 0, 0, 0, 0, time.UTC).AddDate(0, 0, i*7)
+		if !a.Points[i].Date.Equal(week) {
+			t.Errorf("week %d date=%v want %v", i, a.Points[i].Date, week)
+		}
 		if a.Points[i].Value != want {
 			t.Errorf("week %d=%v want %v", i, a.Points[i].Value, want)
 		}
@@ -164,6 +168,9 @@ func TestCardioIntegration(t *testing.T) {
 	ra, err := s.RoutineAnalytics(ctx, routine, today, today)
 	if err != nil || ra.Sessions != 1 {
 		t.Fatalf("routine analytics included cardio: %#v %v", ra, err)
+	}
+	if len(ra.Points) != 1 || ra.Points[0].Date.Format("2006-01-02") != today {
+		t.Fatalf("routine chart date missing: %#v", ra.Points)
 	}
 	overview, err := s.AnalyticsOverview(ctx, today, today)
 	if err != nil || len(overview.Exercises) != 0 {

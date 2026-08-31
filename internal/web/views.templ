@@ -15,9 +15,9 @@ templ Layout(title string) {
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
 			<title>{ title } · Tempo</title>
-			<link rel="stylesheet" href="/static/app.css?v=20260830-cardio"/>
+			<link rel="stylesheet" href="/static/app.css?v=20260831-charts"/>
 			<script src="/static/htmx.min.js?v=2.0.4" integrity="sha384-HGfztofotfshcF7+8n44JQL2oJmowVChPTg48S+jvZoztPfvwD79OC/LTtG6dMp+"></script>
-			<script src="/static/app.js?v=20260830-server-emom" defer></script>
+			<script src="/static/app.js?v=20260831-charts" defer></script>
 		</head>
 		<body>
 			<header class="site-header">
@@ -496,22 +496,8 @@ templ AnalyticsPage(a domain.AnalyticsOverview) {
 		<section><div class="section-title"><h2>Exercises</h2><span>{ fmt.Sprintf("%d with completed work",len(a.Exercises)) }</span></div>@ExerciseSummaryTable(a.Exercises,inputDate(a.From),inputDate(a.To))</section>
 	}
 }
-templ Chart(points []domain.ChartPoint,label string) {
-	<div class="chart" role="img" aria-label={ label }>
-		if len(points) == 0 {
-			<p class="muted">Complete sessions to see a trend.</p>
-		} else {
-			<svg viewBox="0 0 600 210" preserveAspectRatio="none" aria-hidden="true"><line x1="20" y1="180" x2="580" y2="180"></line><polyline points={ chartPoints(points) }></polyline>
-				for i, p := range points {
-					<circle cx={ chartX(i,len(points)) } cy={ chartY(points,p.Value) } r="5"><title>{ p.Label }: { number(p.Value) }</title></circle>
-				}
-			</svg><div class="chart-labels"><span>{ points[0].Label }</span><span>{ points[len(points)-1].Label }</span></div>
-		}
-	</div>
-}
-
 templ RoutineAnalyticsPage(a domain.RoutineAnalytics) {
-	@Layout("Routine progress") { <a class="back" href={ templ.SafeURL(fmt.Sprintf("/routines/%d",a.Routine.ID)) }>← { a.Routine.Name }</a>@PageHeader("Routine analytics",a.Routine.Name,"Completion consistency and exercise-specific training work over the selected period.") { @DateFilter(inputDate(a.From),inputDate(a.To)) }<div class="metric-grid"><div class="metric accent"><span>Sessions</span><strong>{ fmt.Sprintf("%d",a.Sessions) }</strong><small>{ fmt.Sprintf("%.1f per week",a.SessionsPerWeek) }</small></div><div class="metric"><span>Exercises</span><strong>{ fmt.Sprintf("%d",len(a.Exercises)) }</strong><small>with completed work</small></div><div class="metric"><span>Completed work</span><strong>{ fmt.Sprintf("%d",a.Reps) }</strong><small>{ fmt.Sprintf("%d sets",a.Sets) }</small></div><div class="metric"><span>Longest gap</span><strong>{ fmt.Sprintf("%d",a.LongestGapDays) }</strong><small>days</small></div></div><section class="panel chart-panel"><div class="section-title"><h2>Session trend</h2><span>{ date(a.From) } – { date(a.To) }</span></div>@Chart(a.Points,"Completed sessions over time")</section><section><div class="section-title"><h2>Work by exercise</h2><span>Volume stays exercise-specific</span></div>@ExerciseSummaryTable(a.Exercises,inputDate(a.From),inputDate(a.To))</section> }
+	@Layout("Routine progress") { <a class="back" href={ templ.SafeURL(fmt.Sprintf("/routines/%d",a.Routine.ID)) }>← { a.Routine.Name }</a>@PageHeader("Routine analytics",a.Routine.Name,"Completion consistency and exercise-specific training work over the selected period.") { @DateFilter(inputDate(a.From),inputDate(a.To)) }<div class="metric-grid"><div class="metric accent"><span>Sessions</span><strong>{ fmt.Sprintf("%d",a.Sessions) }</strong><small>{ fmt.Sprintf("%.1f per week",a.SessionsPerWeek) }</small></div><div class="metric"><span>Exercises</span><strong>{ fmt.Sprintf("%d",len(a.Exercises)) }</strong><small>with completed work</small></div><div class="metric"><span>Completed work</span><strong>{ fmt.Sprintf("%d",a.Reps) }</strong><small>{ fmt.Sprintf("%d sets",a.Sets) }</small></div><div class="metric"><span>Longest gap</span><strong>{ fmt.Sprintf("%d",a.LongestGapDays) }</strong><small>days</small></div></div><section class="panel chart-panel"><div class="section-title"><h2>Session trend</h2><span>{ date(a.From) } – { date(a.To) }</span></div>@Chart(a.Points,"Completed sessions over time",chartOptions{Unit: "sessions", Whole: true})</section><section><div class="section-title"><h2>Work by exercise</h2><span>Volume stays exercise-specific</span></div>@ExerciseSummaryTable(a.Exercises,inputDate(a.From),inputDate(a.To))</section> }
 }
 
 templ ExerciseAnalyticsPage(a domain.ExerciseAnalytics) {
@@ -524,7 +510,7 @@ templ ExerciseAnalyticsPage(a domain.ExerciseAnalytics) {
 			} else {
 				<div class="metric"><span>Best set</span><strong>{ fmt.Sprintf("%d",a.BestSetReps) }</strong><small>reps</small></div>
 			}
-		</div><section class="panel chart-panel"><div class="section-title"><h2>{ exerciseMetric(a.Exercise.Mode) } trend</h2><span>{ date(a.From) } – { date(a.To) }</span></div>@Chart(a.Points,"Exercise performance over time")</section>
+		</div><section class="panel chart-panel"><div class="section-title"><h2>{ exerciseMetric(a.Exercise.Mode) } trend</h2><span>{ date(a.From) } – { date(a.To) }</span></div>@Chart(a.Points,"Exercise performance over time",exerciseChartOptions(a.Exercise.Mode))</section>
 	}
 }
 

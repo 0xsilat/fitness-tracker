@@ -22,8 +22,11 @@ With Go 1.24 and Templ installed:
 ```sh
 templ generate
 go test ./...
+node --test static/app.test.cjs
 go run ./cmd/fitness-tracker
 ```
+
+Node.js is only needed for the JavaScript interaction tests.
 
 The default development database URL is `postgres://fitness:fitness@localhost:5432/fitness?sslmode=disable`; override it with `DATABASE_URL`. Set `HTTP_ADDR` to change the listen address.
 
@@ -40,6 +43,7 @@ The default development database URL is `postgres://fitness:fitness@localhost:54
 - Completed EMOM changes, including extra minutes and deletions, stay pending until Save changes; Cancel preserves the stored session
 - Server-rendered forms work without JavaScript; the pinned HTMX 2.0.4 script is served locally with its integrity hash and license
 - Routine consistency and routine-independent per-exercise progress analytics
+- Analytics charts with numbered scales, units, time-spaced dates, hover/tap and keyboard inspection, and an expandable data table that works without JavaScript
 - Exercise-specific weighted volume (kg·reps) and bodyweight rep tracking
 - Independent cardio entries with activity, performed date, decimal minutes and optional notes; edit or delete them from the shared training log
 - Ten default cardio activities plus custom, archivable cardio exercises in the shared library

@@ -164,48 +164,6 @@ func setMarker(format string, set domain.SessionSet) string {
 	}
 	return fmt.Sprintf("%d", set.Position)
 }
-func chartPoints(points []domain.ChartPoint) string {
-	if len(points) == 0 {
-		return ""
-	}
-	max := 0.0
-	for _, p := range points {
-		if p.Value > max {
-			max = p.Value
-		}
-	}
-	if max == 0 {
-		max = 1
-	}
-	var out []string
-	for i, p := range points {
-		x := 20.0
-		if len(points) > 1 {
-			x += float64(i) * 560 / float64(len(points)-1)
-		}
-		y := 180 - (p.Value/max)*150
-		out = append(out, fmt.Sprintf("%.1f,%.1f", x, y))
-	}
-	return strings.Join(out, " ")
-}
-func chartX(index, count int) string {
-	if count <= 1 {
-		return "20"
-	}
-	return fmt.Sprintf("%.1f", 20+float64(index)*560/float64(count-1))
-}
-func chartY(points []domain.ChartPoint, value float64) string {
-	max := 0.0
-	for _, p := range points {
-		if p.Value > max {
-			max = p.Value
-		}
-	}
-	if max == 0 {
-		max = 1
-	}
-	return fmt.Sprintf("%.1f", 180-(value/max)*150)
-}
 func exerciseMetric(mode string) string {
 	if mode == "weighted" {
 		return "Volume"

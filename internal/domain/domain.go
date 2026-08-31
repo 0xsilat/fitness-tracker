@@ -163,6 +163,7 @@ type ExerciseAnalytics struct {
 }
 
 type ChartPoint struct {
+	Date  time.Time
 	Label string
 	Value float64
 }

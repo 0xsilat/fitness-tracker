@@ -88,7 +88,7 @@ templ CardioAnalyticsPage(a domain.CardioAnalytics,items []domain.Exercise) {
   if a.Sessions==0 {
  @EmptyState("No cardio in this period","Log a cardio session or adjust your date and activity filters.") {}
  }
-  <section class="panel chart-panel"><div class="section-title"><h2>Minutes per week</h2><span>Monday–Sunday</span></div>@Chart(a.Points,"Cardio minutes per week")<p class="muted">Partial weeks include only dates within the selected period.</p></section>
+  <section class="panel chart-panel"><div class="section-title"><h2>Minutes per week</h2><span>Monday–Sunday</span></div>@Chart(a.Points,"Cardio minutes per week",chartOptions{Unit: "minutes"})<p class="muted">Partial weeks include only dates within the selected period.</p></section>
   <section><div class="section-title"><h2>By activity</h2><span>{ date(a.From) } – { date(a.To) }</span></div>
    <div class="table-wrap"><table><thead><tr><th>Activity</th><th>Sessions</th><th>Minutes</th></tr></thead><tbody>
     for _,x := range a.Exercises {

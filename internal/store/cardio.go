@@ -159,7 +159,7 @@ func (s *Store) CardioAnalytics(ctx context.Context, fromText, toText string, ex
 		if err = rows.Scan(&day, &minutes); err != nil {
 			return a, err
 		}
-		a.Points = append(a.Points, domain.ChartPoint{Label: "Week of " + day.Format("02 Jan 2006"), Value: minutes})
+		a.Points = append(a.Points, domain.ChartPoint{Date: day, Label: "Week of " + day.Format("02 Jan 2006"), Value: minutes})
 	}
 	return a, rows.Err()
 }

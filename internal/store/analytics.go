@@ -39,7 +39,7 @@ func (s *Store) RoutineAnalytics(ctx context.Context, id int64, fromText, toText
 		if err := rows.Scan(&day, &count); err != nil {
 			return a, err
 		}
-		a.Points = append(a.Points, domain.ChartPoint{Label: day.Format("02 Jan"), Value: count})
+		a.Points = append(a.Points, domain.ChartPoint{Date: day, Label: day.Format("02 Jan 2006"), Value: count})
 		if previous != nil {
 			gap := int(day.Sub(*previous).Hours() / 24)
 			if gap > a.LongestGapDays {
@@ -118,7 +118,7 @@ func (s *Store) ExerciseAnalytics(ctx context.Context, id int64, fromText, toTex
 		if err := rows.Scan(&day, &value); err != nil {
 			return a, err
 		}
-		a.Points = append(a.Points, domain.ChartPoint{Label: day.Format("02 Jan"), Value: value})
+		a.Points = append(a.Points, domain.ChartPoint{Date: day, Label: day.Format("02 Jan 2006"), Value: value})
 	}
 	return a, rows.Err()
 }
