@@ -60,6 +60,10 @@ Tempo currently runs with Docker on a machine at my house, where the app and dat
 Tempo is built with Go, Templ, HTMX, and PostgreSQL (Yes I know I suck at frontend). 
 Pages work as server-rendered forms, with JavaScript adding small interaction improvements where they help.
 
+## Contact
+
+- Discord: `silat22`
+
 ## License 📄
 
 [MIT](LICENSE)
