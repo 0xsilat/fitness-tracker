@@ -35,7 +35,10 @@ The default development database URL is `postgres://fitness:fitness@localhost:54
 - Per-exercise sets × reps and EMOM blocks, freely mixed within one workout day
 - Optional rep targets that never limit or overwrite the actual reps logged in a session
 - Autosaved workout drafts and editable completed-session logs backed by stable workout snapshots
-- Server-rendered EMOM logging through Go and HTMX: apply shared reps and optional weight to non-skipped minutes, then expand to edit individual exceptions
+- EMOM quick entry with optional minutes done / sets, reps per minute, and weight: a blank count uses the saved plan; an explicit count sets the exact total, adding rows or clearing excess reps after confirmation
+- EMOM averages beside minutes done, using only logged, non-skipped work minutes; shorter sessions can be completed while retaining unlogged rows
+- Completed EMOM changes, including extra minutes and deletions, stay pending until Save changes; Cancel preserves the stored session
+- Server-rendered forms work without JavaScript; the pinned HTMX 2.0.4 script is served locally with its integrity hash and license
 - Routine consistency and routine-independent per-exercise progress analytics
 - Exercise-specific weighted volume (kg·reps) and bodyweight rep tracking
 - Independent cardio entries with activity, performed date, decimal minutes and optional notes; edit or delete them from the shared training log

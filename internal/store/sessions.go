@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -93,6 +94,15 @@ func (s *Store) Session(ctx context.Context, id int64) (domain.Session, []domain
 			current.Sets = append(current.Sets, domain.SessionSet{ID: *setID, SessionExerciseID: e.ID, Position: *setPosition, Minute: *minute, Reps: *reps, TargetReps: targetReps, WeightKG: *weight, Skipped: *skipped})
 		}
 	}
+	for i := range exercises {
+		e := &exercises[i]
+		if e.Format == "emom" && e.Position > 0 && e.Position <= len(out.Snapshot.Movements) {
+			e.PlannedMinutes = []int{}
+			for _, set := range out.Snapshot.Movements[e.Position-1].Sets {
+				e.PlannedMinutes = append(e.PlannedMinutes, set.Minute)
+			}
+		}
+	}
 	return out, exercises, rows.Err()
 }
 
@@ -101,6 +111,10 @@ type SetUpdate struct {
 	Reps     int
 	WeightKG float64
 	Skipped  bool
+	// ID zero represents a new EMOM minute, committed with the other changes.
+	SessionExerciseID int64
+	Position, Minute  int
+	Deleted           bool
 }
 
 func validateSessionChanges(rpe *int, updates []SetUpdate) error {
@@ -108,7 +122,7 @@ func validateSessionChanges(rpe *int, updates []SetUpdate) error {
 		return errors.New("effort must be between 1 and 10")
 	}
 	for _, u := range updates {
-		if u.Reps < 0 || u.WeightKG < 0 {
+		if u.Reps < 0 || u.WeightKG < 0 || math.IsNaN(u.WeightKG) || math.IsInf(u.WeightKG, 0) {
 			return errors.New("reps and weight cannot be negative")
 		}
 	}
@@ -135,9 +149,21 @@ func (s *Store) SaveDraft(ctx context.Context, id int64, performedOn time.Time, 
 		return errors.New("completed sessions cannot be edited")
 	}
 	for _, u := range updates {
+		if u.Deleted {
+			continue
+		}
+		if u.ID == 0 && u.SessionExerciseID > 0 {
+			if err := insertEMOMMinute(ctx, tx, id, u); err != nil {
+				return err
+			}
+			continue
+		}
 		if _, err = tx.Exec(ctx, `UPDATE session_sets ss SET reps=$2,weight_kg=$3,skipped=$4 FROM session_exercises se WHERE ss.id=$1 AND ss.session_exercise_id=se.id AND se.session_id=$5`, u.ID, u.Reps, u.WeightKG, u.Skipped, id); err != nil {
 			return err
 		}
+	}
+	if err := deleteEMOMMinutes(ctx, tx, id, updates); err != nil {
+		return err
 	}
 	return tx.Commit(ctx)
 }
@@ -164,6 +190,15 @@ func (s *Store) UpdateCompletedSession(ctx context.Context, id int64, performedO
 		return ErrNotFound
 	}
 	for _, u := range updates {
+		if u.Deleted {
+			continue
+		}
+		if u.ID == 0 && u.SessionExerciseID > 0 {
+			if err := insertEMOMMinute(ctx, tx, id, u); err != nil {
+				return err
+			}
+			continue
+		}
 		result, err = tx.Exec(ctx, `UPDATE session_sets ss SET reps=$2,weight_kg=$3,skipped=$4 FROM session_exercises se WHERE ss.id=$1 AND ss.session_exercise_id=se.id AND se.session_id=$5`, u.ID, u.Reps, u.WeightKG, u.Skipped, id)
 		if err != nil {
 			return err
@@ -172,7 +207,57 @@ func (s *Store) UpdateCompletedSession(ctx context.Context, id int64, performedO
 			return ErrNotFound
 		}
 	}
+	if err := deleteEMOMMinutes(ctx, tx, id, updates); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
+}
+
+func deleteEMOMMinutes(ctx context.Context, tx pgx.Tx, sessionID int64, updates []SetUpdate) error {
+	for _, u := range updates {
+		if !u.Deleted {
+			continue
+		}
+		result, err := tx.Exec(ctx, `DELETE FROM session_sets ss USING session_exercises se
+			WHERE ss.id=$1 AND ss.session_exercise_id=se.id AND se.session_id=$2 AND se.id=$3 AND se.workout_format='emom'
+			AND (SELECT count(*) FROM session_sets WHERE session_exercise_id=se.id)>1`, u.ID, sessionID, u.SessionExerciseID)
+		if err != nil {
+			return err
+		}
+		if result.RowsAffected() != 1 {
+			return errors.New("cannot remove the last minute or a minute outside this session")
+		}
+	}
+	// Keep positions contiguous after deferred deletions and insertions.
+	for _, u := range updates {
+		if !u.Deleted {
+			continue
+		}
+		if _, err := tx.Exec(ctx, `UPDATE session_sets ss SET position=n.position FROM
+			(SELECT id,row_number() OVER (ORDER BY position,id) AS position FROM session_sets WHERE session_exercise_id=$1) n
+			WHERE ss.id=n.id`, u.SessionExerciseID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func insertEMOMMinute(ctx context.Context, tx pgx.Tx, sessionID int64, u SetUpdate) error {
+	if u.Minute <= 0 || u.Position <= 0 {
+		return errors.New("invalid new EMOM minute")
+	}
+	result, err := tx.Exec(ctx, `INSERT INTO session_sets(session_exercise_id,position,planned_minute,reps,weight_kg,skipped)
+		SELECT se.id,$3,$4,$5,$6,$7 FROM session_exercises se
+		WHERE se.id=$2 AND se.session_id=$1 AND se.workout_format='emom'
+		AND $3=(SELECT coalesce(max(position),0)+1 FROM session_sets WHERE session_exercise_id=se.id)`,
+		sessionID, u.SessionExerciseID, u.Position, u.Minute, u.Reps, u.WeightKG, u.Skipped)
+	if err != nil {
+		return err
+	}
+	if result.RowsAffected() != 1 {
+		return errors.New("the session changed; reload before adding minutes")
+	}
+	return nil
 }
 
 func (s *Store) AddSessionSet(ctx context.Context, sessionID, sessionExerciseID int64) error {
@@ -218,7 +303,8 @@ func (s *Store) DeleteSessionSet(ctx context.Context, sessionID, setID int64) (i
 
 func (s *Store) CompleteSession(ctx context.Context, id int64) error {
 	var unfinished int
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM session_sets ss JOIN session_exercises se ON se.id=ss.session_exercise_id JOIN sessions s ON s.id=se.session_id WHERE s.id=$1 AND s.status='draft' AND NOT ss.skipped AND ss.reps<=0`, id).Scan(&unfinished); err != nil {
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM session_sets ss JOIN session_exercises se ON se.id=ss.session_exercise_id JOIN sessions s ON s.id=se.session_id WHERE s.id=$1 AND s.status='draft' AND NOT ss.skipped AND ss.reps<=0
+		AND (se.workout_format!='emom' OR NOT EXISTS (SELECT 1 FROM session_sets logged WHERE logged.session_exercise_id=se.id AND logged.reps>0 AND NOT logged.skipped))`, id).Scan(&unfinished); err != nil {
 		return err
 	}
 	if unfinished > 0 {

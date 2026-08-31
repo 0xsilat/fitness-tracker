@@ -493,7 +493,16 @@ func (s *Server) updateSession(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err == nil {
-		err = s.db.UpdateCompletedSession(r.Context(), id, performedOn, r.FormValue("notes"), rpe, parseSetUpdates(r))
+		var session domain.Session
+		var exercises []domain.SessionExercise
+		session, exercises, err = s.db.Session(r.Context(), id)
+		if err == nil {
+			var updates []store.SetUpdate
+			updates, err = overlaySessionForm(r, &session, exercises)
+			if err == nil {
+				err = s.db.UpdateCompletedSession(r.Context(), id, performedOn, r.FormValue("notes"), rpe, updates)
+			}
+		}
 	}
 	if err != nil {
 		s.fail(w, r, err)

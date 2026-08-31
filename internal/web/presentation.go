@@ -149,7 +149,7 @@ func actualRepsValue(value int) string {
 func completedExerciseSets(exercise domain.SessionExercise) int {
 	count := 0
 	for _, set := range exercise.Sets {
-		if set.Reps > 0 && !set.Skipped {
+		if set.Reps > 0 && !set.Skipped && !set.Deleted {
 			count++
 		}
 	}
